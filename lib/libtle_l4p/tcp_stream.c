@@ -252,6 +252,7 @@ tcp_stream_setup(void)
 		.free_drbs = tcp_free_drbs,
 	};
 
+	//注册tcp协议
 	tle_stream_ops[TLE_PROTO_TCP] = tcp_ops;
 }
 

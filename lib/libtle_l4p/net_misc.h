@@ -42,6 +42,7 @@ enum {
 extern const struct in6_addr tle_ipv6_any;
 extern const struct in6_addr tle_ipv6_none;
 
+//4层源端口，目的源口号
 union l4_ports {
 	uint32_t raw;
 	struct {
@@ -50,6 +51,7 @@ union l4_ports {
 	};
 };
 
+//ipv4源目的ip地址
 union ipv4_addrs {
 	uint64_t raw;
 	struct {
@@ -58,6 +60,7 @@ union ipv4_addrs {
 	};
 };
 
+//源目的ipv6地址
 union ipv6_addrs {
 	_ymm_t raw;
 	struct {
@@ -66,6 +69,7 @@ union ipv6_addrs {
 	};
 };
 
+//统一的ip地址
 union ip_addrs {
 	union ipv4_addrs v4;
 	union ipv6_addrs v6;

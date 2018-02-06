@@ -29,12 +29,13 @@ struct stbl_entry {
 
 struct shtbl {
 	uint32_t nb_ent;  /* max number of entries in the table. */
-	rte_spinlock_t l; /* lock to protect the hash table */
+	rte_spinlock_t l; /* lock to protect the hash table *///锁，保护t
 	struct rte_hash *t;
-	struct stbl_entry *ent;
+	struct stbl_entry *ent;//实体表
 } __rte_cache_aligned;
 
 struct stbl {
+	//ipv4,ipv6每人一张表
 	struct shtbl ht[TLE_VNUM];
 };
 
@@ -129,12 +130,14 @@ stbl_find_entry(struct stbl *st, const union pkt_info *pi)
 	stbl_pkt_fill_key(&k, pi, type);
 	ht = st->ht + type;
 
+	//在本报文对应的ht中查找对应的k
 	rc = rte_hash_lookup(ht->t, &k);
 	if ((uint32_t)rc >= ht->nb_ent)
-		return NULL;
+		return NULL;//没有找到
 	return ht->ent + rc;
 }
 
+//给定pi，查其对应的数据
 static inline void *
 stbl_find_data(struct stbl *st, const union pkt_info *pi)
 {

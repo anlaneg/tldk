@@ -103,6 +103,7 @@ tle_ctx_create(const struct tle_ctx_param *ctx_prm)
 
 	ctx->prm = *ctx_prm;
 
+	//依据不同协议进行初始化
 	rc = tle_stream_ops[ctx_prm->proto].init_streams(ctx);
 	if (rc != 0) {
 		UDP_LOG(ERR, "init_streams(ctx=%p, proto=%u) failed "

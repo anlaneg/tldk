@@ -145,7 +145,7 @@ struct netbe_lcore {
 };
 
 struct netbe_cfg {
-	uint32_t promisc;
+	uint32_t promisc;//混杂模式
 	uint32_t proto;
 	uint32_t server;
 	uint32_t arp;

@@ -803,6 +803,7 @@ read_tx_content(const char *fname, struct tx_content *tx)
 	return rc;
 }
 
+//l4fwd命令行解析
 int
 parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 	struct tle_ctx_param *ctx_prm,
@@ -873,13 +874,13 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 				optarg);
 		} else if (opt == OPT_SHORT_UDP) {
 			udp = 1;
-			cfg->proto = TLE_PROTO_UDP;
+			cfg->proto = TLE_PROTO_UDP;//指明udp协议
 		} else if (opt == OPT_SHORT_TCP) {
 			tcp = 1;
-			cfg->proto = TLE_PROTO_TCP;
+			cfg->proto = TLE_PROTO_TCP;//指明tcp协议
 		} else if (opt == OPT_SHORT_LISTEN) {
 			listen = 1;
-			cfg->server = 1;
+			cfg->server = 1;//指明服务端
 		} else if (opt == OPT_SHORT_HASH) {
 			ctx_prm->hash_alg = parse_hash_alg(optarg);
 			if (ctx_prm->hash_alg >= TLE_HASH_NUM) {

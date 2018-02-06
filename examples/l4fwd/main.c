@@ -207,6 +207,7 @@ main(int argc, char *argv[])
 	becfg_fname[0] = 0;
 	memset(prm, 0, sizeof(prm));
 
+	//dpdk初始化
 	rc = rte_eal_init(argc, argv);
 	if (rc < 0)
 		rte_exit(EXIT_FAILURE,
@@ -221,6 +222,7 @@ main(int argc, char *argv[])
 	argc -= rc;
 	argv += rc;
 
+	//解析l4fwd命令行
 	rc = parse_app_options(argc, argv, &becfg, &ctx_prm,
 		fecfg_fname, becfg_fname);
 	if (rc != 0)
@@ -248,6 +250,7 @@ main(int argc, char *argv[])
 	for (i = 0; i != becfg.prt_num && rc == 0; i++) {
 		RTE_LOG(NOTICE, USER1, "%s: starting port %u\n",
 			__func__, becfg.prt[i].id);
+		//使接口up
 		rc = rte_eth_dev_start(becfg.prt[i].id);
 		if (rc != 0) {
 			RTE_LOG(ERR, USER1,
@@ -256,6 +259,7 @@ main(int argc, char *argv[])
 				__func__, becfg.prt[i].id, rc);
 			sig_handle(SIGQUIT);
 		}
+		//获取接口信息
 		rte_eth_dev_info_get(becfg.prt[i].id, &dev_info);
 		rc = update_rss_reta(&becfg.prt[i], &dev_info);
 		if (rc != 0)
@@ -276,6 +280,7 @@ main(int argc, char *argv[])
 		sig_handle(SIGQUIT);
 
 	/* launch all slave lcores. */
+	//调用func_ptrs_init中注册的lcore_main的回调
 	RTE_LCORE_FOREACH_SLAVE(i) {
 		if (prm[i].be.lc != NULL || prm[i].fe.max_streams != 0)
 			rte_eal_remote_launch(lcore_main, prm + i, i);

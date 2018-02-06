@@ -1063,15 +1063,18 @@ be_rx(struct tldk_dev *dev)
 	struct rte_mbuf *rp[MAX_PKT_BURST];
 	int32_t rc[MAX_PKT_BURST];
 
+	//自接口收包
 	n = rte_eth_rx_burst(dev->cf.port,
 		dev->cf.queue, pkt, RTE_DIM(pkt));
 
 	if (n != 0) {
+		//收包入口计数加1
 		dev->rx_stat.in += n;
 		BE_TRACE("%s(%u): rte_eth_rx_burst(%u, %u) returns %u\n",
 			__func__, dev->cf.id, dev->cf.port,
 			dev->cf.queue, n);
 
+		//进入tcp报文批量处理
 		k = tle_tcp_rx_bulk(dev->dev, pkt, rp, rc, n);
 
 		dev->rx_stat.up += k;
@@ -1079,6 +1082,7 @@ be_rx(struct tldk_dev *dev)
 		BE_TRACE("%s: tle_tcp_rx_bulk(%p, %u) returns %u\n",
 			__func__, dev->dev, n, k);
 
+		//释放掉remain的报文
 		for (j = 0; j != n - k; j++) {
 			BE_TRACE("%s:%d(port=%u) rp[%u]={%p, %d};\n",
 				__func__, __LINE__, dev->cf.port,
@@ -1138,8 +1142,8 @@ be_lcore_tcp(struct tldk_ctx *tcx)
 		return;
 
 	for (i = 0; i != tcx->nb_dev; i++) {
-		be_rx(&tcx->dev[i]);
-		be_tx(&tcx->dev[i]);
+		be_rx(&tcx->dev[i]);//自设备dev[i]收包
+		be_tx(&tcx->dev[i]);//向设备dev[i]发包
 	}
 	tle_tcp_process(tcx->ctx, TCP_MAX_PROCESS);
 }

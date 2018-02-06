@@ -82,13 +82,13 @@ union typflg {
 union pkt_info {
 	rte_xmm_t raw;
 	struct {
-		union typflg tf;
+		union typflg tf;//tcp flags
 		uint16_t csf;  /* checksum flags */
-		union l4_ports port;
+		union l4_ports port;//源目的port
 		union {
 			union ipv4_addrs addr4;
 			const union ipv6_addrs *addr6;
-		};
+		};//源目的ip地址
 	};
 };
 
@@ -394,6 +394,7 @@ get_tms_opts(uintptr_t p, uint32_t len)
 	return ts;
 }
 
+//返回报文类型（ipv4,ipv6)
 static inline uint8_t
 get_pkt_type(const struct rte_mbuf *m)
 {
@@ -409,6 +410,7 @@ get_pkt_type(const struct rte_mbuf *m)
 		return TLE_VNUM;
 }
 
+//解析tcp报文
 static inline void
 get_pkt_info(const struct rte_mbuf *m, union pkt_info *pi, union seg_info *si)
 {
@@ -427,20 +429,24 @@ get_pkt_info(const struct rte_mbuf *m, union pkt_info *pi, union seg_info *si)
 	pi->addr4.raw = 0;
 
 	if (type == TLE_V4) {
+		//偏移到src_addr,一次性取到源地址，目的地址
 		pa4 = rte_pktmbuf_mtod_offset(m, const union ipv4_addrs *,
 			len + offsetof(struct ipv4_hdr, src_addr));
 		pi->addr4.raw = pa4->raw;
 	} else if (type == TLE_V6) {
+		//取ipv6的src,dst ipv6地址
 		pi->addr6 = rte_pktmbuf_mtod_offset(m, const union ipv6_addrs *,
 			len + offsetof(struct ipv6_hdr, src_addr));
 	}
 
 	len += m->l3_len;
+	//取tcp头
 	tcph = rte_pktmbuf_mtod_offset(m, const struct tcp_hdr *, len);
+	//取源目的port
 	prt = (const union l4_ports *)
 		((uintptr_t)tcph + offsetof(struct tcp_hdr, src_port));
 	pi->tf.flags = tcph->tcp_flags;
-	pi->tf.type = type;
+	pi->tf.type = type;//ipv4或者ipv6类型
 	pi->csf = m->ol_flags & (PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_BAD);
 	pi->port.raw = prt->raw;
 

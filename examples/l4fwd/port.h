@@ -377,8 +377,10 @@ netbe_port_init(struct netbe_cfg *cfg)
 	struct netbe_port *prt;
 	struct netbe_lcore *lc;
 
+	//遍历所有的端口
 	for (i = 0; i != cfg->prt_num; i++) {
 		prt = cfg->prt + i;
+		//配置接口
 		rc = port_init(prt, cfg->proto);
 		if (rc != 0) {
 			RTE_LOG(ERR, USER1,
@@ -388,6 +390,7 @@ netbe_port_init(struct netbe_cfg *cfg)
 		}
 		rte_eth_macaddr_get(prt->id, &prt->mac);
 		if (cfg->promisc)
+			//设置混杂模式
 			rte_eth_promiscuous_enable(prt->id);
 
 		for (j = 0; j < prt->nb_lcore; j++) {
@@ -414,6 +417,7 @@ netbe_port_init(struct netbe_cfg *cfg)
 					return rc;
 			}
 
+			//初始化队列
 			rc = queue_init(prt, mpool[sid]);
 			if (rc != 0) {
 				RTE_LOG(ERR, USER1,

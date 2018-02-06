@@ -63,6 +63,7 @@ rx_obtain_listen_stream(const struct tle_dev *dev, const union pkt_info *pi,
 		return NULL;
 
 	/* check that we have a proper stream. */
+	//如果此流的壮态不是listen,则释放此流
 	if (s->tcb.state != TCP_ST_LISTEN) {
 		tcp_stream_release(s);
 		s = NULL;
@@ -79,6 +80,7 @@ rx_obtain_stream(const struct tle_dev *dev, struct stbl *st,
 
 	s = stbl_find_data(st, pi);
 	if (s == NULL) {
+		//没有找到此流对应的会话表
 		if (pi->tf.flags == TCP_FLAG_ACK)
 			return rx_obtain_listen_stream(dev, pi, type);
 		return NULL;
@@ -134,12 +136,14 @@ pkt_info_bulk_syneq(const union pkt_info pi[], uint32_t num)
 	i = 1;
 
 	if (pi[0].tf.type == TLE_V4) {
+		//ipv4报文处理
 		while (i != num && pi[0].tf.raw == pi[i].tf.raw &&
 				pi[0].port.dst == pi[i].port.dst &&
 				pi[0].addr4.dst == pi[i].addr4.dst)
 			i++;
 
 	} else if (pi[0].tf.type == TLE_V6) {
+		//ipv6报文处理
 		while (i != num && pi[0].tf.raw == pi[i].tf.raw &&
 				pi[0].port.dst == pi[i].port.dst &&
 				xmm_cmp(&pi[0].addr6->dst,
@@ -1876,6 +1880,13 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 	return num - k;
 }
 
+/*
+ * tcp报文批量处理
+ * @pkt 收到的报
+ * @rp 出参，剩余的报（无法处理的包，或者要丢掉的包）
+ * @rc 剩余包对应的出接口
+ * @num 一共有多少个待处理的包
+ */
 uint16_t
 tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 	struct rte_mbuf *rp[], int32_t rc[], uint16_t num)
@@ -1901,13 +1912,18 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 	/* extract packet info and check the L3/L4 csums */
 	for (i = 0; i != num; i++) {
 
+		//解析tcp报文，将信息存在pi[i]中，将段信息存在si[i]中
 		get_pkt_info(pkt[i], &pi[i], &si[i]);
 
 		t = pi[i].tf.type;
+		//如果网卡收包时，报ip checksum有误，或者l4层checksum有误
+		//将返回非0
 		csf = dev->rx.ol_flags[t] &
 			(PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_BAD);
 
 		/* check csums in SW */
+		//check sum检查，如果硬件认为bad或者未填写checksump或者软件校验
+		//check sum后认为非0均认为checksum失效，置csf
 		if (pi[i].csf == 0 && csf != 0 && check_pkt_csum(pkt[i], csf,
 				pi[i].tf.type, IPPROTO_TCP) != 0)
 			pi[i].csf = csf;
@@ -1915,6 +1931,7 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 		stu.t[t] = mt;
 	}
 
+	//锁st->ht表
 	if (stu.t[TLE_V4] != 0)
 		stbl_lock(st, TLE_V4);
 	if (stu.t[TLE_V6] != 0)
@@ -1930,9 +1947,10 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 			rc[k] = EINVAL;
 			rp[k] = pkt[i];
 			j = 1;
-			k++;
+			k++;//checksum 有误的报，或者不认识的协议报文，均跳过
 		/* process input SYN packets */
 		} else if (pi[i].tf.flags == TCP_FLAG_SYN) {
+			//仅包含syn
 			j = pkt_info_bulk_syneq(pi + i, num - i);
 			n = rx_syn(dev, t, ts, pi + i, si + i, pkt + i,
 				rp + k, rc + k, j);
@@ -1945,6 +1963,7 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 		}
 	}
 
+	//解锁
 	if (stu.t[TLE_V4] != 0)
 		stbl_unlock(st, TLE_V4);
 	if (stu.t[TLE_V6] != 0)
