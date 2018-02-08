@@ -89,6 +89,7 @@ struct tcb {
 		uint8_t nb_retx; /* number of retransmission */
 		uint8_t nb_retm; /**< max number of retx attempts. */
 	} snd;
+	//存储syn报文中的选项
 	struct syn_opts so; /* initial syn options. */
 };
 
@@ -97,7 +98,7 @@ struct tle_tcp_stream {
 	struct tle_stream s;
 
 	uint32_t flags;
-	rte_atomic32_t use;
+	rte_atomic32_t use;//引用计数
 
 	struct stbl_entry *ste;     /* entry in streams table. */
 	struct tcb tcb;

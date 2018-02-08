@@ -130,6 +130,7 @@ sync_mss2idx(uint16_t mss, const rte_xmm_t *msl)
 		return (mss >= msl->u32[1]) ? 1 : 0;
 }
 
+//生成一个seq
 static inline uint32_t
 sync_gen_seq(const union pkt_info *pi, uint32_t seq, uint32_t ts, uint16_t mss,
 		uint32_t hash_alg, rte_xmm_t *secret_key)

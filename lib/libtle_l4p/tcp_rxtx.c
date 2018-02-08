@@ -35,6 +35,7 @@
  * checks if input TCP ports and IP addresses match given stream.
  * returns zero on success.
  */
+//通过与的方式，检查此报文是否可接受
 static inline int
 rx_check_stream(const struct tle_tcp_stream *s, const union pkt_info *pi)
 {
@@ -52,18 +53,20 @@ rx_check_stream(const struct tle_tcp_stream *s, const union pkt_info *pi)
 	return rc;
 }
 
+//查找pi对应的tcp目的端口
 static inline struct tle_tcp_stream *
 rx_obtain_listen_stream(const struct tle_dev *dev, const union pkt_info *pi,
 	uint32_t type)
 {
 	struct tle_tcp_stream *s;
 
+	//查此目的地址对应的监听表,如果s不存在，则目的不可达
 	s = (struct tle_tcp_stream *)dev->dp[type]->streams[pi->port.dst];
 	if (s == NULL || tcp_stream_acquire(s) < 0)
 		return NULL;
 
 	/* check that we have a proper stream. */
-	//如果此流的壮态不是listen,则释放此流
+	//如果此流的状态不是listen,则释放此流
 	if (s->tcb.state != TCP_ST_LISTEN) {
 		tcp_stream_release(s);
 		s = NULL;
@@ -78,14 +81,17 @@ rx_obtain_stream(const struct tle_dev *dev, struct stbl *st,
 {
 	struct tle_tcp_stream *s;
 
+	//检查会话表
 	s = stbl_find_data(st, pi);
 	if (s == NULL) {
-		//没有找到此流对应的会话表
+		//没有找到此流对应的会话表，检查是否之前发送了syn,我们回复了syn+ack,现在是ack过来了
+		//检查监听表
 		if (pi->tf.flags == TCP_FLAG_ACK)
 			return rx_obtain_listen_stream(dev, pi, type);
 		return NULL;
 	}
 
+	//增加对s的引用计数
 	if (tcp_stream_acquire(s) < 0)
 		return NULL;
 	/* check that we have a proper stream. */
@@ -128,6 +134,8 @@ pkt_info_bulk_eq(const union pkt_info pi[], uint32_t num)
 	return i;
 }
 
+//处理tcp报文（仅包含syn标记，pi是数组，其有效长度为num）
+//跳过pi中与pi0连续相等的报文
 static inline int
 pkt_info_bulk_syneq(const union pkt_info pi[], uint32_t num)
 {
@@ -136,14 +144,14 @@ pkt_info_bulk_syneq(const union pkt_info pi[], uint32_t num)
 	i = 1;
 
 	if (pi[0].tf.type == TLE_V4) {
-		//ipv4报文处理
+		//自pi开始检查，如果与pi[0]相等，则直接跳过相等的
 		while (i != num && pi[0].tf.raw == pi[i].tf.raw &&
 				pi[0].port.dst == pi[i].port.dst &&
 				pi[0].addr4.dst == pi[i].addr4.dst)
 			i++;
 
 	} else if (pi[0].tf.type == TLE_V6) {
-		//ipv6报文处理
+		//ipv6报文同样处理
 		while (i != num && pi[0].tf.raw == pi[i].tf.raw &&
 				pi[0].port.dst == pi[i].port.dst &&
 				xmm_cmp(&pi[0].addr6->dst,
@@ -203,7 +211,7 @@ fill_tcph(struct tcp_hdr *l4h, const struct tcb *tcb, union l4_ports port,
 	l4h->sent_seq = rte_cpu_to_be_32(seq);
 	l4h->recv_ack = rte_cpu_to_be_32(tcb->rcv.nxt);
 	l4h->data_off = hlen / TCP_DATA_ALIGN << TCP_DATA_OFFSET;
-	l4h->tcp_flags = flags;
+	l4h->tcp_flags = flags;//设置flags
 	l4h->rx_win = rte_cpu_to_be_16(wnd);
 	l4h->cksum = 0;
 	l4h->tcp_urp = 0;
@@ -556,11 +564,13 @@ send_pkt(struct tle_tcp_stream *s, struct tle_dev *dev, struct rte_mbuf *m)
 		return -ENOBUFS;
 
 	/* enqueue pkt for TX. */
+	//报文进设备发队列
 	nb = 1;
 	n = tle_dring_mp_enqueue(&dev->tx.dr, (const void * const*)&m, 1,
 		&drb, &nb);
 
 	/* free unused drbs. */
+	//丢掉没有发成功的包
 	if (nb != 0)
 		stream_drb_free(s, &drb, 1);
 
@@ -643,6 +653,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	type = s->s.type;
 
 	/* get destination information. */
+	//取我们需要回复的目的ip地址
 	if (type == TLE_V4)
 		da = &pi->addr4.src;
 	else
@@ -652,11 +663,14 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	if (rc < 0)
 		return rc;
 
+	//取tcp头部指针
 	th = rte_pktmbuf_mtod_offset(m, const struct tcp_hdr *,
 		m->l2_len + m->l3_len);
+	//取tcp syn包中的选项
 	get_syn_opts(&s->tcb.so, (uintptr_t)(th + 1), m->l4_len - sizeof(*th));
 
 	s->tcb.rcv.nxt = si->seq + 1;
+	//生成一个seq
 	seq = sync_gen_seq(pi, s->tcb.rcv.nxt, ts, s->tcb.so.mss,
 				s->s.ctx->prm.hash_alg,
 				&s->s.ctx->prm.secret_key);
@@ -675,6 +689,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	dev = dst.dev;
 	pid = get_ip_pid(dev, 1, type, (s->flags & TLE_CTX_FLAG_ST) != 0);
 
+	//填充tcp报文
 	rc = tcp_fill_mbuf(m, s, &dst, 0, pi->port, seq,
 		TCP_FLAG_SYN | TCP_FLAG_ACK, pid, 1);
 	if (rc == 0)
@@ -1759,6 +1774,7 @@ rx_new_stream(struct tle_tcp_stream *s, uint32_t ts,
 	return 0;
 }
 
+//处理syn之后的其它类型报文
 static inline uint32_t
 rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 	const union pkt_info pi[], union seg_info si[],
@@ -1769,6 +1785,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 	uint32_t i, k, n, state;
 	int32_t ret;
 
+	//查找会话表
 	s = rx_obtain_stream(dev, st, &pi[0], type);
 	if (s == NULL) {
 		for (i = 0; i != num; i++) {
@@ -1782,7 +1799,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 	state = s->tcb.state;
 
 	if (state == TCP_ST_LISTEN) {
-
+		//当前s处于listen状态，说明取的s为监听表中的s，需要创建会话表
 		/* one connection per flow */
 		cs = NULL;
 		ret = -EINVAL;
@@ -1831,6 +1848,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 		}
 
 	} else {
+		//已建意的流表项处理
 		i = rx_stream(s, ts, pi, si, mb, rp, rc, num);
 		k = num - i;
 	}
@@ -1840,6 +1858,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 }
 
 
+//处理syn报文
 static inline uint32_t
 rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 	const union pkt_info pi[], const union seg_info si[],
@@ -1852,6 +1871,7 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 
 	s = rx_obtain_listen_stream(dev, &pi[0], type);
 	if (s == NULL) {
+		//目的不可达（需要回复rst)
 		for (i = 0; i != num; i++) {
 			rc[i] = ENOENT;
 			rp[i] = mb[i];
@@ -1864,9 +1884,10 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 
 		/* check that this remote is allowed to connect */
 		if (rx_check_stream(s, &pi[i]) != 0)
-			ret = -ENOENT;
+			ret = -ENOENT;//地址未绑定情况
 		else
 			/* syncokie: reply with <SYN,ACK> */
+			//回复ack
 			ret = sync_ack(s, &pi[i], &si[i], ts, mb[i]);
 
 		if (ret != 0) {
@@ -1950,12 +1971,14 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 			k++;//checksum 有误的报，或者不认识的协议报文，均跳过
 		/* process input SYN packets */
 		} else if (pi[i].tf.flags == TCP_FLAG_SYN) {
-			//仅包含syn
+			//跳过与pi+i相等的报文（需要紧挨着），（i到j之间的这些报文不需要处理，因为它们与i相等）
 			j = pkt_info_bulk_syneq(pi + i, num - i);
+			//处理第i个包
 			n = rx_syn(dev, t, ts, pi + i, si + i, pkt + i,
 				rp + k, rc + k, j);
 			k += j - n;
 		} else {
+			//跳过相同的报文
 			j = pkt_info_bulk_eq(pi + i, num - i);
 			n = rx_postsyn(dev, st, t, ts, pi + i, si + i, pkt + i,
 				rp + k, rc + k, j);

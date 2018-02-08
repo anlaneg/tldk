@@ -261,29 +261,38 @@ get_seg_info(const struct tcp_hdr *th, union seg_info *si)
 	si->raw.x = _mm_shuffle_epi8(v, bswap_mask);
 }
 
+//自p位置开始解析tcp syn报文中的选项，选项的长度有len字节（含padding)
 static inline void
 get_syn_opts(struct syn_opts *so, uintptr_t p, uint32_t len)
 {
 	uint32_t i, kind;
 	const struct tcpopt *opt;
 
+	//清空so
 	memset(so, 0, sizeof(*so));
 
 	i = 0;
 	while (i < len) {
 		opt = (const struct tcpopt *)(p + i);
+		//取选项类型
 		kind = opt->kl.kind;
+		//选项结束标记，解析完成，退出
 		if (kind == TCP_OPT_KIND_EOL)
 			return;
+		//空选项标记，跳过此字节
 		else if (kind == TCP_OPT_KIND_NOP)
 			i += sizeof(opt->kl.kind);
 		else {
+			//先跳过这个选项，检查选项长度是否合法（不合法直接不忽略）
 			i += opt->kl.len;
 			if (i <= len) {
+				//mss占用两个字节
 				if (opt->kl.raw == TCP_OPT_KL_MSS)
 					so->mss = rte_be_to_cpu_16(opt->mss);
+				//窗口大小
 				else if (opt->kl.raw == TCP_OPT_KL_WSC)
 					so->wscale = opt->wscale;
+				//报文时间
 				else if (opt->kl.raw == TCP_OPT_KL_TMS) {
 					so->ts.val =
 						rte_be_to_cpu_32(opt->ts.val);

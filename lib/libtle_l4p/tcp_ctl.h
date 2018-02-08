@@ -68,8 +68,10 @@ tcp_stream_release(struct tle_tcp_stream *s)
 	int32_t v;
 
 	if ((s->flags & TLE_CTX_FLAG_ST) == 0)
+		//如果引用计数为0，则释放
 		rwl_release(&s->use);
 	else {
+		//否则减1
 		v = rte_atomic32_read(&s->use) - 1;
 		rte_atomic32_set(&s->use, v);
 	}

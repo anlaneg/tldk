@@ -31,6 +31,7 @@ extern "C" {
 
 struct tle_dport {
 	struct tle_pbm use; /* ports in use. */
+	//监听表（其内容可以为tcp监听表，udp监听表，例如：tle_tcp_stream）
 	struct tle_stream *streams[MAX_PORT_NUM]; /* port to stream. */
 };
 
@@ -45,9 +46,10 @@ struct tle_dev {
 		rte_atomic32_t packet_id[TLE_VNUM];
 
 		/* used by FE & BE. */
-		struct tle_dring dr;
+		struct tle_dring dr;//用于发送报文
 	} tx;
 	struct tle_dev_param prm; /* copy of device parameters. */
+
 	struct tle_dport *dp[TLE_VNUM]; /* device L4 ports */
 };
 

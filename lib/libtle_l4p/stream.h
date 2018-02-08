@@ -35,7 +35,10 @@ struct tle_stream {
 
 	/* Stream address information. */
 	union l4_ports port;
+	//流的port地址将与此值与，与后与port进行对比，相同才能匹配
+	//原则上只有匹配目的ip地址与目的端口地址
 	union l4_ports pmsk;
+
 
 	union {
 		struct {
