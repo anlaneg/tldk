@@ -81,21 +81,21 @@ struct netbe_port {
 };
 
 struct netbe_dest {
-	uint32_t line;
-	uint32_t port;
-	uint32_t mtu;
-	uint32_t prfx;
+	uint32_t line;//行号
+	uint32_t port;//接口编号
+	uint32_t mtu;//接口mtu
+	uint32_t prfx;//ip地址masklen(前缀）
 	uint16_t family;
 	union {
-		struct in_addr ipv4;
+		struct in_addr ipv4;//接口ip地址
 		struct in6_addr ipv6;
 	};
-	struct ether_addr mac;
+	struct ether_addr mac;//接口的mac地址
 };
 
 struct netbe_dest_prm {
-	uint32_t nb_dest;
-	struct netbe_dest *dest;
+	uint32_t nb_dest;//接口表数目
+	struct netbe_dest *dest;//接口表
 };
 
 struct pkt_buf {
@@ -128,8 +128,8 @@ struct netbe_dev {
 struct netbe_lcore {
 	uint32_t id;
 	uint32_t proto; /**< L4 proto to handle. */
-	struct rte_lpm *lpm4;
-	struct rte_lpm6 *lpm6;
+	struct rte_lpm *lpm4;//ipv4路由表
+	struct rte_lpm6 *lpm6;//ipv6路由表
 	struct rte_ip_frag_tbl *ftbl;
 	struct tle_ctx *ctx;
 	uint32_t prtq_num;

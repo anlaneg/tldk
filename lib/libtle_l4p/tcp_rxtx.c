@@ -637,7 +637,7 @@ send_ack(struct tle_tcp_stream *s, uint32_t tms, uint32_t flags)
 	return 0;
 }
 
-
+//服务器端响应syn报文，回复syn+ack
 static int
 sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	const union seg_info *si, uint32_t ts, struct rte_mbuf *m)
@@ -654,6 +654,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 
 	/* get destination information. */
 	//取我们需要回复的目的ip地址
+	//（原报文的源地址即为我们需要回复的目的地址）
 	if (type == TLE_V4)
 		da = &pi->addr4.src;
 	else
@@ -678,7 +679,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	s->tcb.so.ts.val = sync_gen_ts(ts, s->tcb.so.wscale);
 	s->tcb.so.wscale = (s->tcb.so.wscale == TCP_WSCALE_NONE) ?
 		TCP_WSCALE_NONE : TCP_WSCALE_DEFAULT;
-	s->tcb.so.mss = calc_smss(dst.mtu, &dst);
+	s->tcb.so.mss = calc_smss(dst.mtu, &dst);//依据接口生成mtu
 
 	/* reset mbuf's data contents. */
 	len = m->l2_len + m->l3_len + m->l4_len;
@@ -1883,11 +1884,14 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 	for (i = 0; i != num; i++) {
 
 		/* check that this remote is allowed to connect */
+		//目的端口是对的，这里检查是否为合适的目的ip(服务器端在监听时
+		//可以选择监听0.0.0.0做为目的ip，也可以监听127.0.0.1或者某个其它ip
+		//这里有个问题，能否监听一个ip段？（好像不能，未确认）
 		if (rx_check_stream(s, &pi[i]) != 0)
 			ret = -ENOENT;//地址未绑定情况
 		else
 			/* syncokie: reply with <SYN,ACK> */
-			//回复ack
+			//目的可达，client发送了syn,做为服务端，现在回复syn + ack
 			ret = sync_ack(s, &pi[i], &si[i], ts, mb[i]);
 
 		if (ret != 0) {
@@ -1973,7 +1977,7 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 		} else if (pi[i].tf.flags == TCP_FLAG_SYN) {
 			//跳过与pi+i相等的报文（需要紧挨着），（i到j之间的这些报文不需要处理，因为它们与i相等）
 			j = pkt_info_bulk_syneq(pi + i, num - i);
-			//处理第i个包
+			//处理第i个包,负责回复syn+ack
 			n = rx_syn(dev, t, ts, pi + i, si + i, pkt + i,
 				rp + k, rc + k, j);
 			k += j - n;

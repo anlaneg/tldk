@@ -129,6 +129,7 @@ netbe_dest_init(const char *fname, struct netbe_cfg *cfg)
 	struct netbe_lcore *lc;
 	struct netbe_dest_prm prm;
 
+	//解析接口配置文件
 	rc = netbe_parse_dest(fname, &prm);
 	if (rc != 0)
 		return rc;

@@ -299,6 +299,7 @@ netbe_lcore_clear(void)
 	RTE_PER_LCORE(_be) = NULL;
 }
 
+//添加ipv4路由表
 static int
 netbe_add_ipv4_route(struct netbe_lcore *lc, const struct netbe_dest *dst,
 	uint8_t idx)
@@ -425,8 +426,10 @@ netbe_add_dest(struct netbe_lcore *lc, uint32_t dev_idx, uint16_t family,
 		fill_dst(dp + i, lc->prtq + dev_idx, dst + i, l3_type, sid,
 			proto);
 		if (family == AF_INET)
+			//添加ipv4路由
 			rc = netbe_add_ipv4_route(lc, dst + i, n + i);
 		else
+			//添加ipv6路由
 			rc = netbe_add_ipv6_route(lc, dst + i, n + i);
 	}
 

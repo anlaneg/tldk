@@ -153,6 +153,7 @@ parse_ipv6_val(__rte_unused const char *key, const char *val, void *prm)
 	return 0;
 }
 
+//解析ip地址
 static int
 parse_ip_val(__rte_unused const char *key, const char *val, void *prm)
 {
@@ -174,6 +175,7 @@ do {                                                      \
 	(v) = t;                                          \
 } while (0)
 
+//解析mac地址
 static int
 parse_mac_val(__rte_unused const char *key, const char *val, void *prm)
 {
@@ -245,6 +247,10 @@ parse_lcore_list_val(__rte_unused const char *key, const char *val, void *prm)
 	return 0;
 }
 
+//处理key,values 列表，keys_man是必须出现的key,nb_man是此数组的大小
+//keys_opt 是可以出现的key,nb_opt是此数组的大小，hndl是每个key对应的处理过程
+//其排列顺序是，先排keys_man的，然后排keys_opt的，其数组大小为nb_man+nb_opt
+//val是过程需要的参数
 static int
 parse_kvargs(const char *arg, const char *keys_man[], uint32_t nb_man,
 	const char *keys_opt[], uint32_t nb_opt,
@@ -253,6 +259,7 @@ parse_kvargs(const char *arg, const char *keys_man[], uint32_t nb_man,
 	uint32_t j, k;
 	struct rte_kvargs *kvl;
 
+	//将arg解析为kvlist(逗号划分）
 	kvl = rte_kvargs_parse(arg, NULL);
 	if (kvl == NULL) {
 		RTE_LOG(ERR, USER1,
@@ -262,6 +269,7 @@ parse_kvargs(const char *arg, const char *keys_man[], uint32_t nb_man,
 	}
 
 	for (j = 0; j != nb_man; j++) {
+		//如果keys_man中key，在kvlist中未出现（必备参数，需要出现）则报错
 		if (rte_kvargs_count(kvl, keys_man[j]) == 0) {
 			RTE_LOG(ERR, USER1,
 				"%s: %s missing mandatory key: %s\n",
@@ -271,6 +279,7 @@ parse_kvargs(const char *arg, const char *keys_man[], uint32_t nb_man,
 		}
 	}
 
+	//处理必备key对应的过程
 	for (j = 0; j != nb_man; j++) {
 		if (rte_kvargs_process(kvl, keys_man[j], hndl[j],
 				val + j) != 0) {
@@ -282,6 +291,7 @@ parse_kvargs(const char *arg, const char *keys_man[], uint32_t nb_man,
 		}
 	}
 
+	//处理可选key对应的过程
 	for (j = 0; j != nb_opt; j++) {
 		k = j + nb_man;
 		if (rte_kvargs_process(kvl, keys_opt[j], hndl[k],
@@ -363,6 +373,7 @@ static int
 check_netbe_dest(const struct netbe_dest *dst)
 {
 	if (dst->port >= RTE_MAX_ETHPORTS) {
+		//接口号必须小于RTE_MAX_ETHPORTS
 		RTE_LOG(ERR, USER1, "%s(line=%u) invalid port=%u",
 			__func__, dst->line, dst->port);
 		return -EINVAL;
@@ -370,22 +381,28 @@ check_netbe_dest(const struct netbe_dest *dst)
 			dst->prfx > sizeof(struct in_addr) * CHAR_BIT) ||
 			(dst->family == AF_INET6 &&
 			dst->prfx > sizeof(struct in6_addr) * CHAR_BIT)) {
+		//前缀不能越界(过长）
 		RTE_LOG(ERR, USER1, "%s(line=%u) invalid masklen=%u",
 			__func__, dst->line, dst->prfx);
 		return -EINVAL;
 	} else if (dst->mtu > ETHER_MAX_JUMBO_FRAME_LEN - ETHER_CRC_LEN) {
+		//mtu不能过大
 		RTE_LOG(ERR, USER1, "%s(line=%u) invalid mtu=%u",
 			__func__, dst->line, dst->mtu);
 		return -EINVAL;
 	}
+	//还应检查，mac地址是否为组播mac
+	//ip地址是否为全0,ip地址是否为全1
 	return 0;
 }
 
+//解析各接口配置
 static int
 parse_netbe_dest(struct netbe_dest *dst, const char *arg)
 {
 	int32_t rc;
 
+	//必备参数
 	static const char *keys_man[] = {
 		"port",
 		"addr",
@@ -393,22 +410,27 @@ parse_netbe_dest(struct netbe_dest *dst, const char *arg)
 		"mac",
 	};
 
+	//可选参数
 	static const char *keys_opt[] = {
 		"mtu",
 	};
 
+	//各参数处理回调
 	static const arg_handler_t hndl[] = {
 		parse_uint_val,
 		parse_ip_val,
 		parse_uint_val,
-		parse_mac_val,
-		parse_uint_val,
+		parse_mac_val,//mac地址解析
+		parse_uint_val,//无符号整数解析
 	};
 
+	//各参数传入的参数（出参，负责结果）
 	union parse_val val[RTE_DIM(hndl)];
 
 	/* set default values. */
 	memset(val, 0, sizeof(val));
+	//这里改为RTE_DIM(hndl)-1更合适些（设置最后一个元素）
+	//mtu的默认值是jumbo-crc
 	val[4].u64 = ETHER_MAX_JUMBO_FRAME_LEN - ETHER_CRC_LEN;
 
 	rc = parse_kvargs(arg, keys_man, RTE_DIM(keys_man),
@@ -416,6 +438,7 @@ parse_netbe_dest(struct netbe_dest *dst, const char *arg)
 	if (rc != 0)
 		return rc;
 
+	//获取每个接口，它的端口号，ip地址，掩码长度，mac地址
 	dst->port = val[0].u64;
 	dst->family = val[1].in.family;
 	if (val[1].in.family == AF_INET)
@@ -429,6 +452,7 @@ parse_netbe_dest(struct netbe_dest *dst, const char *arg)
 	return 0;
 }
 
+//读取配置文件，生成接口配置表
 int
 netbe_parse_dest(const char *fname, struct netbe_dest_prm *prm)
 {
@@ -451,23 +475,28 @@ netbe_parse_dest(const char *fname, struct netbe_dest_prm *prm)
 	num = 0;
 	dp = NULL;
 	rc = 0;
+	//打开文件，并逐行读取
 	for (ln = 0; fgets(line, sizeof(line), f) != NULL; ln++) {
 
 		/* skip spaces at the start. */
+		//跳过前导的空格
 		for (s = line; isspace(s[0]); s++)
 			;
 
 		/* skip comment line. */
+		//跳过注释行
 		if (s[0] == '#' || s[0] == 0)
 			continue;
 
 		/* skip spaces at the end. */
+		//跳过结尾的空格（使其不包含在s中）
 		for (i = strlen(s); i-- != 0 && isspace(s[i]); s[i] = 0)
 			;
 
+		//如果是首次或者dp空间为满，则初始化或者增长dp
 		if (n == num) {
-			num += DEF_LINE_NUM;
-			sz = sizeof(dp[0]) * num;
+			num += DEF_LINE_NUM;//增加1024
+			sz = sizeof(dp[0]) * num;//dp的申请大小为sz
 			dp = realloc(dp, sizeof(dp[0]) * num);
 			if (dp == NULL) {
 				RTE_LOG(ERR, USER1,
@@ -480,15 +509,15 @@ netbe_parse_dest(const char *fname, struct netbe_dest_prm *prm)
 			memset(&dp[n], 0, sizeof(dp[0]) * (num - n));
 		}
 
-		dp[n].line = ln + 1;
-		rc = parse_netbe_dest(dp + n, s);
+		dp[n].line = ln + 1;//记录行号(行号从1开始）
+		rc = parse_netbe_dest(dp + n, s);//解析接口配置
 		rc = (rc != 0) ? rc : check_netbe_dest(dp + n);
 		if (rc != 0) {
 			RTE_LOG(ERR, USER1, "%s(%s) failed to parse line %u\n",
 				__func__, fname, dp[n].line);
 			break;
 		}
-		n++;
+		n++;//已填充一个位置（跳到下一个位置）
 	}
 
 	fclose(f);

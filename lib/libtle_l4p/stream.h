@@ -31,6 +31,7 @@ struct tle_stream {
 	STAILQ_ENTRY(tle_stream) link;
 	struct tle_ctx *ctx;
 
+	//流类型，ipv4或者ipv6
 	uint8_t type;	       /* TLE_V4 or TLE_V6 */
 
 	/* Stream address information. */
@@ -137,6 +138,7 @@ stream_get_dest(struct tle_stream *s, const void *dst_addr,
 	/* it is here just to keep gcc happy. */
 	d4 = NULL;
 
+	//查路由，找下一跳
 	if (s->type == TLE_V4) {
 		d4 = dst_addr;
 		rc = ctx->prm.lookup4(ctx->prm.lookup4_data, d4, dst);

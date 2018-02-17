@@ -34,9 +34,11 @@ lpm4_dst_lookup(void *data, const struct in_addr *addr,
 
 	lc = data;
 
+	//查询ipv4路由表
 	rc = rte_lpm_lookup(lc->lpm4, rte_be_to_cpu_32(addr->s_addr), &idx);
 	if (rc == 0) {
 		dst = &lc->dst4[idx];
+		//将查出来的信息copy到res中，并返回
 		rte_memcpy(res, dst, dst->l2_len + dst->l3_len +
 			offsetof(struct tle_dest, hdr));
 	}
@@ -162,7 +164,7 @@ create_context(struct netbe_lcore *lc, const struct tle_ctx_param *ctx_prm)
 		cprm = *ctx_prm;
 		cprm.socket_id = sid;
 		cprm.proto = lc->proto;
-		cprm.lookup4 = lpm4_dst_lookup;
+		cprm.lookup4 = lpm4_dst_lookup;//ipv4路由表查询
 		cprm.lookup4_data = lc;
 		cprm.lookup6 = lpm6_dst_lookup;
 		cprm.lookup6_data = lc;
