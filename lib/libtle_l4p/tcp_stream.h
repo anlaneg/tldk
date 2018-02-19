@@ -55,7 +55,7 @@ struct tcb {
 	volatile uint16_t state;
 	volatile uint16_t uop; /* operations by user performed */
 	struct {
-		uint32_t nxt;
+		uint32_t nxt;//下次收到的报文起始序号
 		uint32_t irs; /* initial received sequence */
 		uint32_t wnd;
 		uint32_t ts;

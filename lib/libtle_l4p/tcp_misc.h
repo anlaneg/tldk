@@ -317,6 +317,7 @@ fill_syn_opts(void *p, const struct syn_opts *so)
 	to = (uint8_t *)p;
 
 	/* setup MSS*/
+	//设置mss
 	opt = (struct tcpopt *)to;
 	opt->kl.raw = TCP_OPT_KL_MSS;
 	opt->mss = rte_cpu_to_be_16(so->mss);
@@ -325,6 +326,7 @@ fill_syn_opts(void *p, const struct syn_opts *so)
 	opt = (struct tcpopt *)to;
 
 	/* setup TMS*/
+	//设置tms
 	if (so->ts.val != 0) {
 
 		opt->kl.raw = TCP_OPT_KL_TMS;
@@ -336,6 +338,7 @@ fill_syn_opts(void *p, const struct syn_opts *so)
 	}
 
 	/* setup TMS*/
+	//设置窗口放大因子
 	if (so->wscale != 0) {
 
 		opt->kl.raw = TCP_OPT_KL_WSC;
@@ -345,6 +348,7 @@ fill_syn_opts(void *p, const struct syn_opts *so)
 		opt = (struct tcpopt *)to;
 	}
 
+	//设置对齐
 	to[0] = TCP_OPT_KIND_EOL;
 }
 
@@ -357,7 +361,7 @@ fill_tms_opts(void *p, uint32_t val, uint32_t ecr)
 {
 	uint32_t *opt;
 
-	opt = (uint32_t *)p;
+	opt = (uint32_t *)p;//仅设置tms
 	opt[0] = TCP_OPT_TMS_HDR;
 	opt[1] = rte_cpu_to_be_32(val);
 	opt[2] = rte_cpu_to_be_32(ecr);
@@ -454,10 +458,10 @@ get_pkt_info(const struct rte_mbuf *m, union pkt_info *pi, union seg_info *si)
 	//取源目的port
 	prt = (const union l4_ports *)
 		((uintptr_t)tcph + offsetof(struct tcp_hdr, src_port));
-	pi->tf.flags = tcph->tcp_flags;
+	pi->tf.flags = tcph->tcp_flags;//取tcp标记位
 	pi->tf.type = type;//ipv4或者ipv6类型
 	pi->csf = m->ol_flags & (PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_BAD);
-	pi->port.raw = prt->raw;
+	pi->port.raw = prt->raw;//取源目的port
 
 	get_seg_info(tcph, si);
 }

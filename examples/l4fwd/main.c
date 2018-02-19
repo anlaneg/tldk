@@ -174,6 +174,7 @@ netbe_dest_init(const char *fname, struct netbe_cfg *cfg)
 static void
 func_ptrs_init(uint32_t proto) {
 	if (proto == TLE_PROTO_TCP) {
+		//注册收发回调
 		tle_rx_bulk = tle_tcp_rx_bulk;
 		tle_tx_bulk = tle_tcp_tx_bulk;
 		tle_stream_recv = tle_tcp_stream_recv;

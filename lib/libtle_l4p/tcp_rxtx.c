@@ -200,25 +200,29 @@ fill_tcph(struct tcp_hdr *l4h, const struct tcb *tcb, union l4_ports port,
 {
 	uint16_t wnd;
 
+	//反向使用port信息
 	l4h->src_port = port.dst;
 	l4h->dst_port = port.src;
 
+	//窗品大小，如果有syn，则取对端窗口及本端最大窗口最大值之间的最小值
 	wnd = (flags & TCP_FLAG_SYN) ?
 		RTE_MIN(tcb->rcv.wnd, (uint32_t)UINT16_MAX) :
-		tcb->rcv.wnd >> tcb->rcv.wscale;
+		tcb->rcv.wnd >> tcb->rcv.wscale;//使用协商的窗口大小
 
 	/* ??? use sse shuffle to hton all remaining 16 bytes at once. ??? */
-	l4h->sent_seq = rte_cpu_to_be_32(seq);
-	l4h->recv_ack = rte_cpu_to_be_32(tcb->rcv.nxt);
+	l4h->sent_seq = rte_cpu_to_be_32(seq);//设置本端seq
+	l4h->recv_ack = rte_cpu_to_be_32(tcb->rcv.nxt);//确认对端的seq(本端ack)
 	l4h->data_off = hlen / TCP_DATA_ALIGN << TCP_DATA_OFFSET;
 	l4h->tcp_flags = flags;//设置flags
-	l4h->rx_win = rte_cpu_to_be_16(wnd);
+	l4h->rx_win = rte_cpu_to_be_16(wnd);//设置窗口大小
 	l4h->cksum = 0;
 	l4h->tcp_urp = 0;
 
 	if (flags & TCP_FLAG_SYN)
+		//设置syn的选项
 		fill_syn_opts(l4h + 1, &tcb->so);
 	else if ((flags & TCP_FLAG_RST) == 0 && tcb->so.ts.raw != 0)
+		//非rst报文，且ts无值
 		fill_tms_opts(l4h + 1, tcb->snd.ts, tcb->rcv.ts);
 }
 
@@ -252,7 +256,7 @@ tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
 
 	/* setup TCP header & options */
 	l4h = (struct tcp_hdr *)(l2h + len);
-	fill_tcph(l4h, &s->tcb, port, seq, l4, flags);
+	fill_tcph(l4h, &s->tcb, port, seq, l4, flags);//设置tcp头部及选项
 
 	/* setup mbuf TX offload related fields. */
 	m->tx_offload = _mbuf_tx_offload(dst->l2_len, dst->l3_len, l4, 0, 0, 0);
@@ -670,7 +674,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	//取tcp syn包中的选项
 	get_syn_opts(&s->tcb.so, (uintptr_t)(th + 1), m->l4_len - sizeof(*th));
 
-	s->tcb.rcv.nxt = si->seq + 1;
+	s->tcb.rcv.nxt = si->seq + 1;//syn报文序号加1
 	//生成一个seq
 	seq = sync_gen_seq(pi, s->tcb.rcv.nxt, ts, s->tcb.so.mss,
 				s->s.ctx->prm.hash_alg,
@@ -679,7 +683,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	s->tcb.so.ts.val = sync_gen_ts(ts, s->tcb.so.wscale);
 	s->tcb.so.wscale = (s->tcb.so.wscale == TCP_WSCALE_NONE) ?
 		TCP_WSCALE_NONE : TCP_WSCALE_DEFAULT;
-	s->tcb.so.mss = calc_smss(dst.mtu, &dst);//依据接口生成mtu
+	s->tcb.so.mss = calc_smss(dst.mtu, &dst);//依据接口mtu生成mss
 
 	/* reset mbuf's data contents. */
 	len = m->l2_len + m->l3_len + m->l4_len;
@@ -694,6 +698,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	rc = tcp_fill_mbuf(m, s, &dst, 0, pi->port, seq,
 		TCP_FLAG_SYN | TCP_FLAG_ACK, pid, 1);
 	if (rc == 0)
+		//将报文发送出去
 		rc = send_pkt(s, dev, m);
 
 	return rc;
@@ -717,9 +722,9 @@ check_seqn(const struct tcb *tcb, uint32_t seqn, uint32_t len)
 	uint32_t n;
 
 	n = seqn + len;
-	if (seqn - tcb->rcv.nxt >= tcb->rcv.wnd &&
+	if (seqn - tcb->rcv.nxt >= tcb->rcv.wnd &&//防止提前收到下一块
 			n - tcb->rcv.nxt > tcb->rcv.wnd)
-		return -ERANGE;
+		return -ERANGE;//seqn必须在tcb->rcv.net与tcb->rcv.wnd范围以内
 
 	return 0;
 }
@@ -1145,6 +1150,7 @@ rx_fin(struct tle_tcp_stream *s, uint32_t state,
 	return plen;
 }
 
+//rst报文处理
 static inline int
 rx_rst(struct tle_tcp_stream *s, uint32_t state, uint32_t flags,
 	const union seg_info *si)
@@ -1158,9 +1164,11 @@ rx_rst(struct tle_tcp_stream *s, uint32_t state, uint32_t flags,
 	 * In the SYN-SENT state (a RST received in response to an initial SYN),
 	 * the RST is acceptable if the ACK field acknowledges the SYN.
 	 */
+	//当前为syn已发送状态，对端回复rst,此时还没有对端的ack,故不检查seq
 	if (state == TCP_ST_SYN_SENT) {
 		rc = ((flags & TCP_FLAG_ACK) == 0 ||
 				si->ack != s->tcb.snd.nxt) ?
+			//检查对端指出的ack是否为本端发送的next,如果是，返回0,否则-ERANGE
 			-ERANGE : 0;
 	}
 
@@ -1168,7 +1176,7 @@ rx_rst(struct tle_tcp_stream *s, uint32_t state, uint32_t flags,
 		rc = check_seqn(&s->tcb, si->seq, 0);
 
 	if (rc == 0)
-		stream_term(s);
+		stream_term(s);//关闭tcp连接
 
 	return rc;
 }
@@ -1648,9 +1656,11 @@ rx_stream(struct tle_tcp_stream *s, uint32_t ts,
 	 */
 
 	/* process RST */
+	//包含rst标记
 	if ((pi->tf.flags & TCP_FLAG_RST) != 0) {
 		for (i = 0;
 				i != num &&
+				//如果rst被处理（返回0），则后面的报文就不需要被处理了
 				rx_rst(s, state, pi->tf.flags, &si[i]);
 				i++)
 			;
@@ -1795,6 +1805,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 		}
 		return 0;
 	}
+	//自mb开始，共有num个报文，属于同一个s
 
 	k = 0;
 	state = s->tcb.state;
@@ -1842,6 +1853,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 
 			/*  process remaining packets for that stream */
 			if (num != i) {
+				//未建立流表项的处理
 				n = rx_new_stream(cs, ts, pi + i, si + i,
 					mb + i, rp + k, rc + k, num - i);
 				k += num - n - i;
@@ -1849,7 +1861,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 		}
 
 	} else {
-		//已建意的流表项处理
+		//已建立的流表项处理
 		i = rx_stream(s, ts, pi, si, mb, rp, rc, num);
 		k = num - i;
 	}
@@ -1870,9 +1882,10 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 	uint32_t i, k;
 	int32_t ret;
 
+	//从pi开始的这些包，一共有num个属于同一条流，因此仅需要查询一次
 	s = rx_obtain_listen_stream(dev, &pi[0], type);
 	if (s == NULL) {
-		//目的不可达（需要回复rst)
+		//查询不到listen表，则目的不可达（需要回复rst)
 		for (i = 0; i != num; i++) {
 			rc[i] = ENOENT;
 			rp[i] = mb[i];
@@ -1891,7 +1904,7 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 			ret = -ENOENT;//地址未绑定情况
 		else
 			/* syncokie: reply with <SYN,ACK> */
-			//目的可达，client发送了syn,做为服务端，现在回复syn + ack
+			//目的可达，client发送了syn,作为服务端，现在回复syn + ack
 			ret = sync_ack(s, &pi[i], &si[i], ts, mb[i]);
 
 		if (ret != 0) {
@@ -1975,14 +1988,14 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 			k++;//checksum 有误的报，或者不认识的协议报文，均跳过
 		/* process input SYN packets */
 		} else if (pi[i].tf.flags == TCP_FLAG_SYN) {
-			//跳过与pi+i相等的报文（需要紧挨着），（i到j之间的这些报文不需要处理，因为它们与i相等）
+			//跳过同一条流的报文（需要紧挨着），（i到j之间的这些报文属于同一条stream,只需要查询一次）
 			j = pkt_info_bulk_syneq(pi + i, num - i);
 			//处理第i个包,负责回复syn+ack
 			n = rx_syn(dev, t, ts, pi + i, si + i, pkt + i,
 				rp + k, rc + k, j);
 			k += j - n;
 		} else {
-			//跳过相同的报文
+			//跳过同一条流的报文，同一条流只需要查询一次stream
 			j = pkt_info_bulk_eq(pi + i, num - i);
 			n = rx_postsyn(dev, st, t, ts, pi + i, si + i, pkt + i,
 				rp + k, rc + k, j);

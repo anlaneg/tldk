@@ -146,7 +146,7 @@ stream_get_dest(struct tle_stream *s, const void *dst_addr,
 		d6 = dst_addr;
 		rc = ctx->prm.lookup6(ctx->prm.lookup6_data, d6, dst);
 	} else
-		rc = -ENOENT;
+		rc = -ENOENT;//无法查询到路由
 
 	if (rc < 0 || dst->dev == NULL || dst->dev->ctx != ctx)
 		return -ENOENT;
@@ -157,6 +157,7 @@ stream_get_dest(struct tle_stream *s, const void *dst_addr,
 	if (s->type == TLE_V4) {
 		struct ipv4_hdr *l3h;
 		l3h = (struct ipv4_hdr *)(dst->hdr + dst->l2_len);
+		//填充ip层源ip地址及目的ip地址
 		l3h->src_addr = dev->prm.local_addr4.s_addr;
 		l3h->dst_addr = d4->s_addr;
 	} else {

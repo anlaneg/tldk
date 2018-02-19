@@ -32,7 +32,7 @@ extern "C" {
 #define	TCP_RTO_DEFAULT	TCP_RTO_MIN   /* RFC 6298 (2.1)*/
 #define	TCP_RTO_GRANULARITY	100U
 
-
+//停止tcp定时器
 static inline void
 timer_stop(struct tle_tcp_stream *s)
 {
