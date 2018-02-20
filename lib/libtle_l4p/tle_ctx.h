@@ -78,7 +78,7 @@ struct tle_dev_param {
 #define TLE_DST_MAX_HDR	0x60
 
 struct tle_dest {
-	struct rte_mempool *head_mp;
+	struct rte_mempool *head_mp;//申请mbuf用
 	/**< MP for fragment headers and control packets. */
 	struct tle_dev *dev;    /**< device to send packets through. */
 	uint64_t ol_flags;      /**< tx ofload flags. */

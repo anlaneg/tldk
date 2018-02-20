@@ -35,7 +35,7 @@ struct tle_stream {
 	uint8_t type;	       /* TLE_V4 or TLE_V6 */
 
 	/* Stream address information. */
-	union l4_ports port;
+	union l4_ports port;//源目的端口信息
 	//流的port地址将与此值与，与后与port进行对比，相同才能匹配
 	//原则上只有匹配目的ip地址与目的端口地址
 	union l4_ports pmsk;
@@ -45,7 +45,7 @@ struct tle_stream {
 		struct {
 			union ipv4_addrs addr;
 			union ipv4_addrs mask;
-		} ipv4;
+		} ipv4;//源目的地址
 		struct {
 			union ipv6_addrs addr;
 			union ipv6_addrs mask;
@@ -53,6 +53,7 @@ struct tle_stream {
 	};
 };
 
+//自ctx->streams中分配num个tle_stream,存储在s数组中
 static inline uint32_t
 get_streams(struct tle_ctx *ctx, struct tle_stream *s[], uint32_t num)
 {
@@ -63,27 +64,29 @@ get_streams(struct tle_ctx *ctx, struct tle_stream *s[], uint32_t num)
 
 	n = RTE_MIN(ctx->streams.nb_free, num);
 	for (i = 0, p = STAILQ_FIRST(&ctx->streams.free);
-			i != n;
+			i != n;//有多个空闲的nb_free
 			i++, p = STAILQ_NEXT(p, link))
-		s[i] = p;
+		s[i] = p;//收集足够数量的stream
 
 	if (p == NULL)
 		/* we retrieved all free entries */
-		STAILQ_INIT(&ctx->streams.free);
+		STAILQ_INIT(&ctx->streams.free);//无空闲stream
 	else
-		STAILQ_FIRST(&ctx->streams.free) = p;
+		STAILQ_FIRST(&ctx->streams.free) = p;//更新空闲stream
 
-	ctx->streams.nb_free -= n;
+	ctx->streams.nb_free -= n;//数量减少
 	rte_spinlock_unlock(&ctx->streams.lock);
 	return n;
 }
 
+//分配一个tle_stream
 static inline struct tle_stream *
 get_stream(struct tle_ctx *ctx)
 {
 	struct tle_stream *s;
 
 	s = NULL;
+	//无空闲节点时，返回NULL
 	if (ctx->streams.nb_free == 0)
 		return s;
 
@@ -91,6 +94,7 @@ get_stream(struct tle_ctx *ctx)
 	return s;
 }
 
+//向ctx->stream中存放一个tle_stream,head变量指出是否存在头部
 static inline void
 put_stream(struct tle_ctx *ctx, struct tle_stream *s, int32_t head)
 {
@@ -123,6 +127,7 @@ drb_nb_elem(const struct tle_ctx *ctx)
 		ctx->prm.send_bulk_size : MAX_PKT_BURST;
 }
 
+//目的地查询
 static inline int32_t
 stream_get_dest(struct tle_stream *s, const void *dst_addr,
 	struct tle_dest *dst)
@@ -157,7 +162,7 @@ stream_get_dest(struct tle_stream *s, const void *dst_addr,
 	if (s->type == TLE_V4) {
 		struct ipv4_hdr *l3h;
 		l3h = (struct ipv4_hdr *)(dst->hdr + dst->l2_len);
-		//填充ip层源ip地址及目的ip地址
+		//填充ip层源ip地址及目的ip地址(填写至hdr中）
 		l3h->src_addr = dev->prm.local_addr4.s_addr;
 		l3h->dst_addr = d4->s_addr;
 	} else {

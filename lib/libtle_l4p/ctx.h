@@ -43,6 +43,7 @@ struct tle_dev {
 	struct {
 		/* used by FE. */
 		uint64_t ol_flags[TLE_VNUM];
+		//ipv4,ipv6各有一个id号生成变量
 		rte_atomic32_t packet_id[TLE_VNUM];
 
 		/* used by FE & BE. */
@@ -57,9 +58,9 @@ struct tle_ctx {
 	struct tle_ctx_param prm;
 	uint32_t cycles_ms_shift;  /* to convert from cycles to ms */
 	struct {
-		rte_spinlock_t lock;
-		uint32_t nb_free; /* number of free streams. */
-		STAILQ_HEAD(, tle_stream) free;
+		rte_spinlock_t lock;//锁，保护streams结构体
+		uint32_t nb_free; /* number of free streams. */ //空闲stream的数目
+		STAILQ_HEAD(, tle_stream) free;//tle_stream的空闲链表
 		void *buf; /* space allocated for streams */
 	} streams;
 

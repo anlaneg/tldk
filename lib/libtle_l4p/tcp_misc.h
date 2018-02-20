@@ -190,7 +190,7 @@ struct syn_opts {
 };
 
 struct resp_info {
-	uint32_t flags;
+	uint32_t flags;//指明响应报文的flags
 };
 
 

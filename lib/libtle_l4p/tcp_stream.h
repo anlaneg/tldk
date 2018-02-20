@@ -52,11 +52,11 @@ enum {
 };
 
 struct tcb {
-	volatile uint16_t state;
+	volatile uint16_t state;//TCP状态
 	volatile uint16_t uop; /* operations by user performed */
 	struct {
 		uint32_t nxt;//下次收到的报文起始序号
-		uint32_t irs; /* initial received sequence */
+		uint32_t irs; /* initial received sequence */ //本次收到的seq
 		uint32_t wnd;
 		uint32_t ts;
 		struct {
@@ -95,7 +95,7 @@ struct tcb {
 
 struct tle_tcp_stream {
 
-	struct tle_stream s;
+	struct tle_stream s;//低层公共结构
 
 	uint32_t flags;
 	rte_atomic32_t use;//引用计数

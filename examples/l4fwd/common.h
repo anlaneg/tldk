@@ -369,17 +369,20 @@ fill_dst(struct tle_dest *dst, struct netbe_dev *bed,
 
 	eth = (struct ether_hdr *)dst->hdr;
 
+	//填充hdr中的l2层数据
 	ether_addr_copy(&bed->port.mac, &eth->s_addr);
 	ether_addr_copy(&bdp->mac, &eth->d_addr);
 	eth->ether_type = rte_cpu_to_be_16(l3_type);
 
+	//填充hdr中的l3层数据
 	if (l3_type == ETHER_TYPE_IPv4) {
+		//tos,id,checksum,fragment,srcip,dstip均未填充
 		dst->l3_len = sizeof(*ip4h);
 		ip4h = (struct ipv4_hdr *)(eth + 1);
 		ip4h->version_ihl = 4 << 4 |
-			sizeof(*ip4h) / IPV4_IHL_MULTIPLIER;
-		ip4h->time_to_live = 64;
-		ip4h->next_proto_id = proto_id;
+			sizeof(*ip4h) / IPV4_IHL_MULTIPLIER;//填充版本号及头部长度
+		ip4h->time_to_live = 64;//ttl
+		ip4h->next_proto_id = proto_id;//下层协议
 	} else if (l3_type == ETHER_TYPE_IPv6) {
 		dst->l3_len = sizeof(*ip6h);
 		ip6h = (struct ipv6_hdr *)(eth + 1);

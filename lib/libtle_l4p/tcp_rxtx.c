@@ -176,6 +176,7 @@ stream_drb_alloc(struct tle_tcp_stream *s, struct tle_drb *drbs[],
 	return _rte_ring_dequeue_burst(s->tx.drb.r, (void **)drbs, nb_drb);
 }
 
+//num即需要多少个id号，生成出接口为某dev的报文id(ip层id号）
 static inline uint32_t
 get_ip_pid(struct tle_dev *dev, uint32_t num, uint32_t type, uint32_t st)
 {
@@ -185,9 +186,11 @@ get_ip_pid(struct tle_dev *dev, uint32_t num, uint32_t type, uint32_t st)
 	pa = &dev->tx.packet_id[type];
 
 	if (st == 0) {
+		//为pa添num后返回（原子变量）
 		pid = rte_atomic32_add_return(pa, num);
 		return pid - num;
 	} else {
+		//非原子性，适用于单线程
 		pid = rte_atomic32_read(pa);
 		rte_atomic32_set(pa, pid + num);
 		return pid;
@@ -228,9 +231,9 @@ fill_tcph(struct tcp_hdr *l4h, const struct tcb *tcb, union l4_ports port,
 
 static inline int
 tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
-	const struct tle_dest *dst, uint64_t ol_flags,
-	union l4_ports port, uint32_t seq, uint32_t flags,
-	uint32_t pid, uint32_t swcsm)
+	const struct tle_dest *dst, uint64_t ol_flags,//offload标记
+	union l4_ports port, uint32_t seq, uint32_t flags,//seq,本端要发送的序号，flags要发送的tcp flags
+	uint32_t pid, uint32_t swcsm)//ip层报文id号，swcsm软件是否需要计算checksum
 {
 	uint32_t l4, len, plen;
 	struct tcp_hdr *l4h;
@@ -252,7 +255,8 @@ tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
 		return -EINVAL;
 
 	/* copy L2/L3 header */
-	rte_memcpy(l2h, dst->hdr, len);
+	//填充l2,l3层头部
+	rte_memcpy(l2h, dst->hdr, len);//自dst中copy l2与l3的头部(常用字段，非全部字段）
 
 	/* setup TCP header & options */
 	l4h = (struct tcp_hdr *)(l2h + len);
@@ -266,6 +270,7 @@ tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
 
 	if (s->s.type == TLE_V4) {
 		struct ipv4_hdr *l3h;
+		//填充id,total_length,cksum,
 		l3h = (struct ipv4_hdr *)(l2h + dst->l2_len);
 		l3h->packet_id = rte_cpu_to_be_16(pid);
 		l3h->total_length = rte_cpu_to_be_16(plen + dst->l3_len + l4);
@@ -606,6 +611,7 @@ send_rst(struct tle_tcp_stream *s, uint32_t seq)
 	struct rte_mbuf *m;
 	int32_t rc;
 
+	//申请一个mbuf
 	m = rte_pktmbuf_alloc(s->tx.dst.head_mp);
 	if (m == NULL)
 		return -ENOMEM;
@@ -691,10 +697,11 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	if (rte_pktmbuf_adj(m, len) == NULL)
 		return -EINVAL;
 
-	dev = dst.dev;
+	dev = dst.dev;//获取出接口对应设备
+	//取dev设备上的ip层id
 	pid = get_ip_pid(dev, 1, type, (s->flags & TLE_CTX_FLAG_ST) != 0);
 
-	//填充tcp报文
+	//填充tcp报文（syn+ack报文）
 	rc = tcp_fill_mbuf(m, s, &dst, 0, pi->port, seq,
 		TCP_FLAG_SYN | TCP_FLAG_ACK, pid, 1);
 	if (rc == 0)
@@ -880,10 +887,12 @@ accept_prep_stream(struct tle_tcp_stream *ps, struct stbl *st,
 		return -EAGAIN;
 
 	/* setup L4 ports and L3 addresses fields. */
+	//填充l4的端口信息
 	cs->s.port.raw = pi->port.raw;
 	cs->s.pmsk.raw = UINT32_MAX;
 
 	if (pi->tf.type == TLE_V4) {
+		//填充l3的端口信息
 		cs->s.ipv4.addr = pi->addr4;
 		cs->s.ipv4.mask.src = INADDR_NONE;
 		cs->s.ipv4.mask.dst = INADDR_NONE;
@@ -972,7 +981,7 @@ rx_ack_listen(struct tle_tcp_stream *s, struct stbl *st,
 
 	/* allocate new stream */
 	ts = get_stream(ctx);
-	cs = TCP_STREAM(ts);
+	cs = TCP_STREAM(ts);//由tle_stream获取tle_tcp_stream
 	if (ts == NULL)
 		return ENFILE;
 
@@ -1583,19 +1592,22 @@ rx_synack(struct tle_tcp_stream *s, uint32_t ts, uint32_t state,
 	struct tcp_hdr *th;
 
 	if (state != TCP_ST_SYN_SENT)
-		return -EINVAL;
+		return -EINVAL;//收到syn+ack时，本端一定发送了syn,丢包
 
 	/* invalid SEG.SEQ */
+	//收到的syn+ack确认的ack序号不正确，回复rst
 	if (si->ack != (uint32_t)s->tcb.snd.nxt) {
 		rsp->flags = TCP_FLAG_RST;
 		return 0;
 	}
 
+	//偏移到tcphdr
 	th = rte_pktmbuf_mtod_offset(mb, struct tcp_hdr *,
 		mb->l2_len + mb->l3_len);
+	//解析其对应的tcp选项
 	get_syn_opts(&so, (uintptr_t)(th + 1), mb->l4_len - sizeof(*th));
 
-	s->tcb.so = so;
+	s->tcb.so = so;//设置提取出来的选项
 
 	s->tcb.snd.una = s->tcb.snd.nxt;
 	s->tcb.snd.mss = calc_smss(so.mss, &s->tx.dst);
@@ -1615,15 +1627,15 @@ rx_synack(struct tle_tcp_stream *s, uint32_t ts, uint32_t state,
 	/* if peer doesn't support WSCALE opt, recalculate RCV.WND */
 	s->tcb.rcv.wscale = (so.wscale == TCP_WSCALE_NONE) ?
 		TCP_WSCALE_NONE : TCP_WSCALE_DEFAULT;
-	s->tcb.rcv.wnd = calc_rx_wnd(s, s->tcb.rcv.wscale);
+	s->tcb.rcv.wnd = calc_rx_wnd(s, s->tcb.rcv.wscale);//设置收取窗口大小
 
 	/* calculate initial rto */
 	rto_estimate(&s->tcb, ts - s->tcb.snd.ts);
 
-	rsp->flags |= TCP_FLAG_ACK;
+	rsp->flags |= TCP_FLAG_ACK;//回复ack
 
 	timer_stop(s);
-	s->tcb.state = TCP_ST_ESTABLISHED;
+	s->tcb.state = TCP_ST_ESTABLISHED;//置状态为稳定连接
 	rte_smp_wmb();
 
 	if (s->tx.ev != NULL)
@@ -1668,7 +1680,7 @@ rx_stream(struct tle_tcp_stream *s, uint32_t ts,
 
 	/* RFC 793: if the ACK bit is off drop the segment and return */
 	} else if ((pi->tf.flags & TCP_FLAG_ACK) == 0) {
-		i = 0;
+		i = 0;//不包含ack,不处理
 	/*
 	 * first check for the states/flags where we don't
 	 * expect groups of packets.
@@ -1676,6 +1688,7 @@ rx_stream(struct tle_tcp_stream *s, uint32_t ts,
 
 	/* process <SYN,ACK> */
 	} else if ((pi->tf.flags & TCP_FLAG_SYN) != 0) {
+		//包含syn+ack
 		for (i = 0; i != num; i++) {
 			ret = rx_synack(s, ts, state, &si[i], mb[i], &rsp);
 			if (ret == 0)
@@ -1688,6 +1701,7 @@ rx_stream(struct tle_tcp_stream *s, uint32_t ts,
 
 	/* process FIN */
 	} else if ((pi->tf.flags & TCP_FLAG_FIN) != 0) {
+		//含有fin+ack
 		ret = 0;
 		for (i = 0; i != num; i++) {
 			ret = rx_fin(s, state, &si[i], mb[i], &rsp);
@@ -1744,9 +1758,10 @@ rx_stream(struct tle_tcp_stream *s, uint32_t ts,
 		i = 0;
 
 	/* we have a response packet to send. */
+	//需要回复rst报文
 	if (rsp.flags == TCP_FLAG_RST) {
-		send_rst(s, si[i].ack);
-		stream_term(s);
+		send_rst(s, si[i].ack);//发送rst报文
+		stream_term(s);//断开term
 	} else if (rsp.flags != 0) {
 		send_ack(s, ts, rsp.flags);
 
@@ -1756,6 +1771,7 @@ rx_stream(struct tle_tcp_stream *s, uint32_t ts,
 	}
 
 	/* unprocessed packets */
+	//指出这个报文未处理
 	for (; i != num; i++, k++) {
 		rc[k] = ENODATA;
 		rp[k] = mb[i];
