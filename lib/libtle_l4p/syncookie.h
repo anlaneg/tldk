@@ -185,6 +185,7 @@ sync_check_ack(const union pkt_info *pi, uint32_t seq, uint32_t ack,
 	return (pi->tf.type == TLE_V4) ? mss4len.u32[mi] : mss6len.u32[mi];
 }
 
+//填充tcb块
 static inline void
 sync_fill_tcb(struct tcb *tcb, const union seg_info *si, const union tsopt *to)
 {
