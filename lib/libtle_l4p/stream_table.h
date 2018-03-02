@@ -127,6 +127,7 @@ stbl_find_entry(struct stbl *st, const union pkt_info *pi)
 	struct stbl_key k;
 
 	type = pi->tf.type;
+	//会话表的查询方式是（srcip,dstip,srcport,dstport)
 	stbl_pkt_fill_key(&k, pi, type);
 	ht = st->ht + type;
 

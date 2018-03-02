@@ -226,6 +226,7 @@ struct dack_info {
 };
 
 /* get current timestamp in ms */
+//取当前tick数，并简单换算成ms
 static inline uint32_t
 tcp_get_tms(uint32_t mshift)
 {

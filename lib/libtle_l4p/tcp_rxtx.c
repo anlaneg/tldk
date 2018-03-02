@@ -75,6 +75,7 @@ rx_obtain_listen_stream(const struct tle_dev *dev, const union pkt_info *pi,
 	return s;
 }
 
+//查找会话表
 static inline struct tle_tcp_stream *
 rx_obtain_stream(const struct tle_dev *dev, struct stbl *st,
 	const union pkt_info *pi, uint32_t type)
@@ -85,7 +86,7 @@ rx_obtain_stream(const struct tle_dev *dev, struct stbl *st,
 	s = stbl_find_data(st, pi);
 	if (s == NULL) {
 		//没有找到此流对应的会话表，检查是否之前发送了syn,我们回复了syn+ack,现在是ack过来了
-		//检查监听表
+		//如果是，则需要检查监听表
 		if (pi->tf.flags == TCP_FLAG_ACK)
 			return rx_obtain_listen_stream(dev, pi, type);
 		return NULL;
@@ -681,7 +682,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	get_syn_opts(&s->tcb.so, (uintptr_t)(th + 1), m->l4_len - sizeof(*th));
 
 	s->tcb.rcv.nxt = si->seq + 1;//syn报文序号加1
-	//生成一个seq
+	//生成一个seq（由于syn flood问题，需要考虑时间，需要考虑mss)
 	seq = sync_gen_seq(pi, s->tcb.rcv.nxt, ts, s->tcb.so.mss,
 				s->s.ctx->prm.hash_alg,
 				&s->s.ctx->prm.secret_key);
@@ -957,6 +958,7 @@ accept_prep_stream(struct tle_tcp_stream *ps, struct stbl *st,
  * == 0 - packet is valid and new stream was opened for it.
  * > 0  - packet is valid, but failed to open new stream.
  */
+//由于采用syn+ack处理syn flood,故由ack来完成由listen到ets的转换
 static inline int
 rx_ack_listen(struct tle_tcp_stream *s, struct stbl *st,
 	const union pkt_info *pi, union seg_info *si,
@@ -970,10 +972,12 @@ rx_ack_listen(struct tle_tcp_stream *s, struct stbl *st,
 
 	*csp = NULL;
 
+	//只接受ack报文，且checksum需要正确（这里可以考虑检查硬件checksum offload的结果）
 	if (pi->tf.flags != TCP_FLAG_ACK || rx_check_stream(s, pi) != 0)
 		return -EINVAL;
 
 	ctx = s->s.ctx;
+	//提取syn中的mss选项
 	rc = restore_syn_opt(si, &to, pi, tms, mb, ctx->prm.hash_alg,
 				&ctx->prm.secret_key);
 	if (rc < 0)
@@ -1826,6 +1830,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 	k = 0;
 	state = s->tcb.state;
 
+	//这个应是unlikely的
 	if (state == TCP_ST_LISTEN) {
 		//当前s处于listen状态，说明取的s为监听表中的s，需要创建会话表
 		/* one connection per flow */
@@ -1833,6 +1838,7 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 		ret = -EINVAL;
 		for (i = 0; i != num; i++) {
 
+			//收到ack,之前已发送syn+ack,由listen转为ets
 			ret = rx_ack_listen(s, st, pi, &si[i], ts, mb[i], &cs);
 
 			/* valid packet encountered */
@@ -1957,6 +1963,7 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 	} stu;
 
 	ctx = dev->ctx;
+	//将当前时间换算成ms
 	ts = tcp_get_tms(ctx->cycles_ms_shift);
 	st = CTX_TCP_STLB(ctx);
 	mt = ((ctx->prm.flags & TLE_CTX_FLAG_ST) == 0);

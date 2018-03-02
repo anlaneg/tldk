@@ -78,11 +78,13 @@ sync_hash4(const union pkt_info *pi, uint32_t seq, rte_xmm_t *secret_key,
 	in4.addr = pi->addr4;
 
 	if (hash_alg == TLE_JHASH) {
+		//采用jhash时
 		v0 = secret_key->u32[0];
 		v1 = secret_key->u32[1];
+		//哈希值采用seq,srcport,dstport,srcip,dstip,secret_key来计算
 		rte_jhash_32b_2hashes(&in4.seq, sizeof(in4) / sizeof(uint32_t),
 				&v0, &v1);
-		return v0 + v1;
+		return v0 + v1;//将出参相加
 	} else {
 		state = *secret_key;
 		siphash_compression(&in4.seq, sizeof(in4) / sizeof(uint32_t),
@@ -138,6 +140,7 @@ sync_gen_seq(const union pkt_info *pi, uint32_t seq, uint32_t ts, uint16_t mss,
 	uint32_t h, mi;
 
 	if (pi->tf.type == TLE_V4) {
+		//算出hash，取出mss对应的索引值
 		h = sync_hash4(pi, seq, secret_key, hash_alg);
 		mi = sync_mss2idx(mss, &mss4len);
 	} else {
@@ -145,6 +148,7 @@ sync_gen_seq(const union pkt_info *pi, uint32_t seq, uint32_t ts, uint16_t mss,
 		mi = sync_mss2idx(mss, &mss6len);
 	}
 
+	//使h加上ts,（h的后2位在或运算执行之前可能就不为0,这样mss协商就有问题？）
 	h += (ts & ~SYNC_MSS_MASK) | mi;
 	return h;
 }
@@ -157,6 +161,7 @@ sync_gen_ts(uint32_t ts, uint32_t wscale)
 	return ts;
 }
 
+//检查此报文是否为syn cookie条件下的ack
 static inline int
 sync_check_ack(const union pkt_info *pi, uint32_t seq, uint32_t ack,
 	uint32_t ts, uint32_t hash_alg, rte_xmm_t *secret_key)
@@ -170,11 +175,13 @@ sync_check_ack(const union pkt_info *pi, uint32_t seq, uint32_t ack,
 
 	h = ack - h;
 	pts = h & ~SYNC_MSS_MASK;
-	mi = h & SYNC_MSS_MASK;
+	mi = h & SYNC_MSS_MASK;//取mss索引
 
+	//ts是当前时间，我们计算的h与当前ts差值不能过大，过大，即说明超时，不容许建立连接
 	if (ts - pts > SYNC_MAX_TMO)
-		return -ERANGE;
+		return -ERANGE;//不满足我们的syn cookie特征
 
+	//取mss协商结果
 	return (pi->tf.type == TLE_V4) ? mss4len.u32[mi] : mss6len.u32[mi];
 }
 
