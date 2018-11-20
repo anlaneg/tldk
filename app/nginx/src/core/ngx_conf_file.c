@@ -176,7 +176,7 @@ ngx_conf_parse(ngx_conf_t *cf, ngx_str_t *filename)
     if (filename) {
 
         /* open configuration file */
-
+    	//打开配置文件
         fd = ngx_open_file(filename->data, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
         if (fd == NGX_INVALID_FILE) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, ngx_errno,
@@ -239,6 +239,7 @@ ngx_conf_parse(ngx_conf_t *cf, ngx_str_t *filename)
 
 
     for ( ;; ) {
+    	//读取token
         rc = ngx_conf_read_token(cf);
 
         /*
@@ -251,10 +252,12 @@ ngx_conf_parse(ngx_conf_t *cf, ngx_str_t *filename)
          *    NGX_CONF_FILE_DONE    the configuration file is done
          */
 
+        //读取失败
         if (rc == NGX_ERROR) {
             goto done;
         }
 
+        //发现'}'符
         if (rc == NGX_CONF_BLOCK_DONE) {
 
             if (type != parse_block) {
@@ -265,9 +268,11 @@ ngx_conf_parse(ngx_conf_t *cf, ngx_str_t *filename)
             goto done;
         }
 
+        //遇到文件结尾
         if (rc == NGX_CONF_FILE_DONE) {
 
             if (type == parse_block) {
+            	//当前解析block,需要block done符号
                 ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                    "unexpected end of file, expecting \"}\"");
                 goto failed;
@@ -276,9 +281,11 @@ ngx_conf_parse(ngx_conf_t *cf, ngx_str_t *filename)
             goto done;
         }
 
+        //遇到block start符号
         if (rc == NGX_CONF_BLOCK_START) {
 
             if (type == parse_param) {
+            	//遇到{符号，必须不能在解析param(此时期待的是ok)
                 ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                    "block directives are not supported "
                                    "in -g option");
@@ -364,6 +371,7 @@ ngx_conf_handler(ngx_conf_t *cf, ngx_int_t last)
 
     found = 0;
 
+    //遍历已加载modules
     for (i = 0; cf->cycle->modules[i]; i++) {
 
         cmd = cf->cycle->modules[i]->commands;
@@ -381,6 +389,7 @@ ngx_conf_handler(ngx_conf_t *cf, ngx_int_t last)
                 continue;
             }
 
+            //找到了对应的command
             found = 1;
 
             if (cf->cycle->modules[i]->type != NGX_CONF_MODULE
@@ -459,6 +468,7 @@ ngx_conf_handler(ngx_conf_t *cf, ngx_int_t last)
                 }
             }
 
+            //执行command设置，完成命令配置
             rv = cmd->set(cf, cmd, conf);
 
             if (rv == NGX_CONF_OK) {
