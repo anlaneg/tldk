@@ -75,7 +75,7 @@ struct netbe_port {
 	uint64_t tx_offload;
 	uint32_t ipv4;
 	struct in6_addr ipv6;
-	struct ether_addr mac;
+	struct rte_ether_addr mac;
 	uint32_t hash_key_size;
 	uint8_t hash_key[RSS_HASH_KEY_LENGTH];
 };
@@ -90,8 +90,7 @@ struct netbe_dest {
 		struct in_addr ipv4;//接口ip地址
 		struct in6_addr ipv6;
 	};
-	struct ether_addr mac;//接口的mac地址
-};
+	struct rte_ether_addr mac;//接口的mac地址
 
 struct netbe_dest_prm {
 	uint32_t nb_dest;//接口表数目
@@ -151,6 +150,7 @@ struct netbe_cfg {
 	uint32_t arp;
 	uint32_t prt_num;
 	uint32_t cpu_num;
+	uint32_t mpool_buf_num;
 	struct netbe_port *prt;
 	struct netbe_lcore *cpu;
 };

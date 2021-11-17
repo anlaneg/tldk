@@ -207,7 +207,7 @@ __udptcp_mbuf_cksum(const struct rte_mbuf *mb, uint16_t l4_ofs,
  *   The non-complemented checksum to set in the L4 header.
  */
 static inline uint16_t
-_ipv4x_phdr_cksum(const struct ipv4_hdr *ipv4_hdr, size_t ipv4h_len,
+_ipv4x_phdr_cksum(const struct rte_ipv4_hdr *ipv4_hdr, size_t ipv4h_len,
 	uint64_t ol_flags)
 {
 	uint32_t s0, s1;
@@ -243,7 +243,7 @@ _ipv4x_phdr_cksum(const struct ipv4_hdr *ipv4_hdr, size_t ipv4h_len,
  */
 static inline int
 _ipv4_udptcp_mbuf_cksum(const struct rte_mbuf *mb, uint16_t l4_ofs,
-	const struct ipv4_hdr *ipv4_hdr)
+	const struct rte_ipv4_hdr *ipv4_hdr)
 {
 	uint32_t cksum;
 
@@ -267,7 +267,7 @@ _ipv4_udptcp_mbuf_cksum(const struct rte_mbuf *mb, uint16_t l4_ofs,
  */
 static inline int
 _ipv6_udptcp_mbuf_cksum(const struct rte_mbuf *mb, uint16_t l4_ofs,
-	const struct ipv6_hdr *ipv6_hdr)
+	const struct rte_ipv6_hdr *ipv6_hdr)
 {
 	uint32_t cksum;
 
@@ -286,33 +286,52 @@ _ipv4x_cksum(const void *iph, size_t len)
 	return (cksum == 0xffff) ? cksum : ~cksum;
 }
 
+/*
+ * helper function to check csum.
+ */
 static inline int
 check_pkt_csum(const struct rte_mbuf *m, uint64_t ol_flags, uint32_t type,
 	uint32_t proto)
 {
-	const struct ipv4_hdr *l3h4;
-	const struct ipv6_hdr *l3h6;
-	const struct udp_hdr *l4h;
-	int32_t ret;
+	const struct rte_ipv4_hdr *l3h4;
+	const struct rte_ipv6_hdr *l3h6;
+	const struct rte_udp_hdr *l4h;
+	uint64_t fl3, fl4;
 	uint16_t csum;
+	int32_t ret;
+
+	fl4 = ol_flags & PKT_RX_L4_CKSUM_MASK;
+	fl3 = (type == TLE_V4) ?
+		(ol_flags & PKT_RX_IP_CKSUM_MASK) : PKT_RX_IP_CKSUM_GOOD;
+
+	/* case 0: both ip and l4 cksum is verified or data is valid */
+	if ((fl3 | fl4) == (PKT_RX_IP_CKSUM_GOOD | PKT_RX_L4_CKSUM_GOOD))
+		return 0;
+
+	/* case 1: either ip or l4 cksum bad */
+	if (fl3 == PKT_RX_IP_CKSUM_BAD || fl4 == PKT_RX_L4_CKSUM_BAD)
+		return 1;
+
+	/* case 2: either ip or l4 or both cksum is unknown */
+	l3h4 = rte_pktmbuf_mtod_offset(m, const struct rte_ipv4_hdr *,
+		m->l2_len);
+	l3h6 = rte_pktmbuf_mtod_offset(m, const struct rte_ipv6_hdr *,
+		m->l2_len);
 
 	ret = 0;
-	l3h4 = rte_pktmbuf_mtod_offset(m, const struct ipv4_hdr *, m->l2_len);
-	l3h6 = rte_pktmbuf_mtod_offset(m, const struct ipv6_hdr *, m->l2_len);
-
-	if ((ol_flags & PKT_RX_IP_CKSUM_BAD) != 0) {
+	if (fl3 == PKT_RX_IP_CKSUM_UNKNOWN && l3h4->hdr_checksum != 0) {
 		csum = _ipv4x_cksum(l3h4, m->l3_len);
 		ret = (csum != UINT16_MAX);
 	}
 
-	if (ret == 0 && (ol_flags & PKT_RX_L4_CKSUM_BAD) != 0) {
+	if (ret == 0 && fl4 == PKT_RX_L4_CKSUM_UNKNOWN) {
 
 		/*
 		 * for IPv4 it is allowed to have zero UDP cksum,
 		 * for IPv6 valid UDP cksum is mandatory.
 		 */
 		if (type == TLE_V4) {
-			l4h = (const struct udp_hdr *)((uintptr_t)l3h4 +
+			l4h = (const struct rte_udp_hdr *)((uintptr_t)l3h4 +
 				m->l3_len);
 			csum = (proto == IPPROTO_UDP && l4h->dgram_cksum == 0) ?
 				UINT16_MAX : _ipv4_udptcp_mbuf_cksum(m,
@@ -491,6 +510,106 @@ _iovec_to_mbsegs(struct iovec *iv, uint32_t seglen, struct rte_mbuf *mb[],
 	iv->iov_len -= tlen;
 
 	return i;
+}
+
+/**
+ * Remove len bytes at the beginning of an mbuf.
+ *
+ * It's an enhancement version of rte_pktmbuf_abj which not support
+ * adjusting length greater than the length of the first segment.
+ *
+ * Returns a pointer to the new mbuf. If the
+ * length is greater than the total length of the mbuf, then the
+ * function will fail and return NULL, without modifying the mbuf.
+ *
+ * @param m
+ *   The packet mbuf.
+ * @param len
+ *   The amount of data to remove (in bytes).
+ * @return
+ *   A pointer to the new start of the data.
+ */
+static inline struct rte_mbuf *
+_rte_pktmbuf_adj(struct rte_mbuf *m, uint32_t len)
+{
+	struct rte_mbuf *next;
+	uint32_t remain, plen;
+	uint16_t segs;
+
+	if (unlikely(len > m->pkt_len))
+		return NULL;
+
+	plen = m->pkt_len;
+	remain = len;
+	segs = m->nb_segs;
+	/* don't free last segment */
+	while (remain >= m->data_len && m->next) {
+		next = m->next;
+		remain -= m->data_len;
+		segs--;
+		rte_pktmbuf_free_seg(m);
+		m = next;
+	}
+
+	if (remain) {
+		m->data_len = (uint16_t)(m->data_len - remain);
+		m->data_off = (uint16_t)(m->data_off + remain);
+	}
+
+	m->pkt_len = plen - len;
+	m->nb_segs = segs;
+	return m;
+}
+
+/**
+ * Remove len bytes of data at the end of the mbuf.
+ *
+ * It's an enhancement version of rte_pktmbuf_trim, which not support
+ * removing length greater than the length of the last segment.
+ *
+ * @param m
+ *   The packet mbuf.
+ * @param len
+ *   The amount of data to remove (in bytes).
+ * @return
+ *   - 0: On success.
+ *   - -1: On error.
+ */
+static inline int
+_rte_pktmbuf_trim(struct rte_mbuf *m, uint32_t len)
+{
+	struct rte_mbuf *last, *next, *tmp;
+	uint32_t remain;
+	uint16_t segs;
+
+	if (unlikely(len > m->pkt_len))
+		return -1;
+
+	tmp = m;
+	/* find the last segment will remain after trim */
+	remain = m->pkt_len - len;
+	while (remain > tmp->data_len) {
+		remain -= tmp->data_len;
+		tmp = tmp->next;
+	}
+
+	/* trim the remained last segment */
+	tmp->data_len = remain;
+
+	/* remove trimmed segments */
+	segs = m->nb_segs;
+	last = tmp;
+	for (tmp = tmp->next; tmp != NULL; tmp = next) {
+		next = tmp->next;
+		rte_pktmbuf_free_seg(tmp);
+		segs--;
+	}
+
+	last->next = NULL;
+	m->pkt_len -= len;
+	m->nb_segs = segs;
+
+	return 0;
 }
 
 #ifdef __cplusplus

@@ -38,9 +38,6 @@ struct tle_dport {
 struct tle_dev {
 	struct tle_ctx *ctx;
 	struct {
-		uint64_t ol_flags[TLE_VNUM];
-	} rx;
-	struct {
 		/* used by FE. */
 		uint64_t ol_flags[TLE_VNUM];
 		//ipv4,ipv6各有一个id号生成变量

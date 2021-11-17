@@ -57,8 +57,7 @@ get_pkt_type(const struct rte_mbuf *m)
 }
 
 static inline union l4_ports
-pkt_info(const struct tle_dev *dev, struct rte_mbuf *m,
-	union l4_ports *ports, union ipv4_addrs *addr4,
+pkt_info(struct rte_mbuf *m, union l4_ports *ports, union ipv4_addrs *addr4,
 	union ipv6_addrs **addr6)
 {
 	uint32_t len;
@@ -70,18 +69,16 @@ pkt_info(const struct tle_dev *dev, struct rte_mbuf *m,
 	len = m->l2_len;
 	if (ret.src == TLE_V4) {
 		pa4 = rte_pktmbuf_mtod_offset(m, union ipv4_addrs *,
-			len + offsetof(struct ipv4_hdr, src_addr));
+			len + offsetof(struct rte_ipv4_hdr, src_addr));
 		addr4->raw = pa4->raw;
-		m->ol_flags |= dev->rx.ol_flags[TLE_V4];
 	} else if (ret.src == TLE_V6) {
 		*addr6 = rte_pktmbuf_mtod_offset(m, union ipv6_addrs *,
-			len + offsetof(struct ipv6_hdr, src_addr));
-		m->ol_flags |= dev->rx.ol_flags[TLE_V6];
+			len + offsetof(struct rte_ipv6_hdr, src_addr));
 	}
 
 	len += m->l3_len;
 	up = rte_pktmbuf_mtod_offset(m, union l4_ports *,
-		len + offsetof(struct udp_hdr, src_port));
+		len + offsetof(struct rte_udp_hdr, src_port));
 	ports->raw = up->raw;
 	ret.dst = ports->dst;
 	return ret;
@@ -178,7 +175,7 @@ tle_udp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 	union ipv6_addrs *pa6[num];
 
 	for (i = 0; i != num; i++)
-		tp[i] = pkt_info(dev, pkt[i], &port[i], &a4[i], &pa6[i]);
+		tp[i] = pkt_info(pkt[i], &port[i], &a4[i], &pa6[i]);
 
 	k = 0;
 	for (i = 0; i != num; i = j) {
@@ -276,7 +273,7 @@ static inline uint32_t
 recv_pkt_process(struct rte_mbuf *m[], uint32_t num, uint32_t type)
 {
 	uint32_t i, k;
-	uint64_t f, flg[num], ofl[num];
+	uint64_t flg[num], ofl[num];
 
 	for (i = 0; i != num; i++) {
 		flg[i] = m[i]->ol_flags;
@@ -286,18 +283,13 @@ recv_pkt_process(struct rte_mbuf *m[], uint32_t num, uint32_t type)
 	k = 0;
 	for (i = 0; i != num; i++) {
 
-		f = flg[i] & (PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_BAD);
-
 		/* drop packets with invalid cksum(s). */
-		if (f != 0 && check_pkt_csum(m[i], m[i]->ol_flags, type,
-				IPPROTO_UDP) != 0) {
+		if (check_pkt_csum(m[i], flg[i], type, IPPROTO_UDP) != 0) {
 			rte_pktmbuf_free(m[i]);
 			m[i] = NULL;
 			k++;
-		} else {
-			m[i]->ol_flags ^= f;
+		} else
 			rte_pktmbuf_adj(m[i], _tx_offload_l4_offset(ofl[i]));
-		}
 	}
 
 	return k;
@@ -363,8 +355,8 @@ udp_fill_mbuf(struct rte_mbuf *m,
 	/* update proto specific fields. */
 
 	if (type == TLE_V4) {
-		struct ipv4_hdr *l3h;
-		l3h = (struct ipv4_hdr *)(l2h + dst->l2_len);
+		struct rte_ipv4_hdr *l3h;
+		l3h = (struct rte_ipv4_hdr *)(l2h + dst->l2_len);
 		l3h->packet_id = rte_cpu_to_be_16(pid);
 		l3h->total_length = rte_cpu_to_be_16(plen + dst->l3_len +
 			sizeof(*l4h));
@@ -378,8 +370,8 @@ udp_fill_mbuf(struct rte_mbuf *m,
 		if ((ol_flags & PKT_TX_IP_CKSUM) == 0)
 			l3h->hdr_checksum = _ipv4x_cksum(l3h, m->l3_len);
 	} else {
-		struct ipv6_hdr *l3h;
-		l3h = (struct ipv6_hdr *)(l2h + dst->l2_len);
+		struct rte_ipv6_hdr *l3h;
+		l3h = (struct rte_ipv6_hdr *)(l2h + dst->l2_len);
 		l3h->payload_len = rte_cpu_to_be_16(plen + sizeof(*l4h));
 		if ((ol_flags & PKT_TX_UDP_CKSUM) != 0)
 			l4h->cksum = rte_ipv6_phdr_cksum(l3h, ol_flags);
@@ -397,13 +389,13 @@ udp_fill_mbuf(struct rte_mbuf *m,
 static inline void
 frag_fixup(const struct rte_mbuf *ms, struct rte_mbuf *mf, uint32_t type)
 {
-	struct ipv4_hdr *l3h;
+	struct rte_ipv4_hdr *l3h;
 
 	mf->ol_flags = ms->ol_flags;
 	mf->tx_offload = ms->tx_offload;
 
 	if (type == TLE_V4 && (ms->ol_flags & PKT_TX_IP_CKSUM) == 0) {
-		l3h = rte_pktmbuf_mtod(mf, struct ipv4_hdr *);
+		l3h = rte_pktmbuf_mtod(mf, struct rte_ipv4_hdr *);
 		l3h->hdr_checksum = _ipv4x_cksum(l3h, mf->l3_len);
 	}
 }
@@ -465,7 +457,7 @@ stream_drb_alloc(struct tle_udp_stream *s, struct tle_drb *drbs[],
 static inline uint16_t
 queue_pkt_out(struct tle_udp_stream *s, struct tle_dev *dev,
 		const void *pkt[], uint16_t nb_pkt,
-		struct tle_drb *drbs[], uint32_t *nb_drb)
+		struct tle_drb *drbs[], uint32_t *nb_drb, uint8_t all_or_nothing)
 {
 	uint32_t bsz, i, n, nb, nbc, nbm;
 
@@ -487,8 +479,11 @@ queue_pkt_out(struct tle_udp_stream *s, struct tle_dev *dev,
 		return 0;
 
 	/* not enough free drbs, reduce number of packets to send. */
-	else if (nb != nbm)
+	else if (nb != nbm) {
+		if (all_or_nothing)
+			return 0;
 		nb_pkt = nb * bsz;
+	}
 
 	/* enqueue packets to the destination device. */
 	nbc = nb;
@@ -559,8 +554,10 @@ tle_udp_stream_send(struct tle_stream *us, struct rte_mbuf *pkt[],
 	mtu = dst.mtu - dst.l2_len - dst.l3_len;
 
 	/* mark stream as not closable. */
-	if (rwl_acquire(&s->tx.use) < 0)
+	if (rwl_acquire(&s->tx.use) < 0) {
+		rte_errno = EAGAIN;
 		return 0;
+	}
 
 	nb = 0;
 	for (i = 0, k = 0; k != num; k = i) {
@@ -587,11 +584,13 @@ tle_udp_stream_send(struct tle_stream *us, struct rte_mbuf *pkt[],
 		if (k != i) {
 			k += queue_pkt_out(s, dst.dev,
 				(const void **)(uintptr_t)&pkt[k], i - k,
-				drb, &nb);
+				drb, &nb, 0);
 
 			/* stream TX queue is full. */
-			if (k != i)
+			if (k != i) {
+				rte_errno = EAGAIN;
 				break;
+			}
 		}
 
 		/* enqueue packet that need to be fragmented */
@@ -607,10 +606,11 @@ tle_udp_stream_send(struct tle_stream *us, struct rte_mbuf *pkt[],
 			}
 
 			n = queue_pkt_out(s, dst.dev,
-				(const void **)(uintptr_t)frag, rc, drb, &nb);
+				(const void **)(uintptr_t)frag, rc, drb, &nb, 1);
 			if (n == 0) {
 				while (rc-- != 0)
 					rte_pktmbuf_free(frag[rc]);
+				rte_errno = EAGAIN;
 				break;
 			}
 

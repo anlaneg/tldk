@@ -67,7 +67,7 @@ union ipv6_addrs {
 		rte_xmm_t src;
 		rte_xmm_t dst;
 	};
-};
+} __attribute__((packed, aligned(1)));
 
 //统一的ip地址
 union ip_addrs {

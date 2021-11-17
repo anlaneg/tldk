@@ -21,35 +21,20 @@ RTE_TARGET ?= x86_64-native-linuxapp-gcc
 include $(RTE_SDK)/mk/rte.vars.mk
 
 # library name
-LIB = libtle_l4p.a
+LIB = libtle_memtank.a
 
 CFLAGS += -O3
 CFLAGS += $(WERROR_FLAGS) -I$(SRCDIR)
 
-EXPORT_MAP := tle_l4p_version.map
+EXPORT_MAP := tle_memtank_version.map
 
 LIBABIVER := 1
 
 #source files
-SRCS-y += ctx.c
-SRCS-y += event.c
-SRCS-y += stream_table.c
-SRCS-y += tcp_ofo.c
-SRCS-y += tcp_stream.c
-SRCS-y += tcp_rxtx.c
-SRCS-y += udp_stream.c
-SRCS-y += udp_rxtx.c
+SRCS-y += memtank.c
+SRCS-y += misc.c
 
-# install this header file
-SYMLINK-y-include += tle_ctx.h
-SYMLINK-y-include += tle_event.h
-SYMLINK-y-include += tle_tcp.h
-SYMLINK-y-include += tle_udp.h
-
-# this lib dependencies
-DEPDIRS-y += lib/libtle_misc
-DEPDIRS-y += lib/libtle_memtank
-DEPDIRS-y += lib/libtle_dring
-DEPDIRS-y += lib/libtle_timer
+SYMLINK-y-include += tle_memtank_pub.h
+SYMLINK-y-include += tle_memtank.h
 
 include $(TLDK_ROOT)/mk/tle.lib.mk

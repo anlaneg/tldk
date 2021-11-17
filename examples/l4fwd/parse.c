@@ -45,6 +45,9 @@ static const struct {
 #define	OPT_SHORT_PROMISC	'P'
 #define	OPT_LONG_PROMISC	"promisc"
 
+#define	OPT_SHORT_MBUFNUM	'M'
+#define	OPT_LONG_MBUFNUM	"mbuf-num"
+
 #define	OPT_SHORT_RBUFS	'R'
 #define	OPT_LONG_RBUFS	"rbufs"
 
@@ -95,6 +98,7 @@ static const struct option long_opt[] = {
 	{OPT_LONG_SBULK, 1, 0, OPT_SHORT_SBULK},
 	{OPT_LONG_CTXFLAGS, 1, 0, OPT_SHORT_CTXFLAGS},
 	{OPT_LONG_PROMISC, 0, 0, OPT_SHORT_PROMISC},
+	{OPT_LONG_MBUFNUM, 1, 0, OPT_SHORT_MBUFNUM},
 	{OPT_LONG_RBUFS, 1, 0, OPT_SHORT_RBUFS},
 	{OPT_LONG_SBUFS, 1, 0, OPT_SHORT_SBUFS},
 	{OPT_LONG_BECFG, 1, 0, OPT_SHORT_BECFG},
@@ -340,7 +344,7 @@ parse_netbe_arg(struct netbe_port *prt, const char *arg, rte_cpuset_t *pcpu)
 	union parse_val val[RTE_DIM(hndl)];
 
 	memset(val, 0, sizeof(val));
-	val[2].u64 = ETHER_MAX_LEN - ETHER_CRC_LEN;
+	val[2].u64 = RTE_ETHER_MAX_LEN - RTE_ETHER_CRC_LEN;
 
 	rc = parse_kvargs(arg, keys_man, RTE_DIM(keys_man),
 		keys_opt, RTE_DIM(keys_opt), hndl, val);
@@ -385,7 +389,8 @@ check_netbe_dest(const struct netbe_dest *dst)
 		RTE_LOG(ERR, USER1, "%s(line=%u) invalid masklen=%u",
 			__func__, dst->line, dst->prfx);
 		return -EINVAL;
-	} else if (dst->mtu > ETHER_MAX_JUMBO_FRAME_LEN - ETHER_CRC_LEN) {
+	} else if (dst->mtu >
+			RTE_ETHER_MAX_JUMBO_FRAME_LEN - RTE_ETHER_CRC_LEN) {
 		//mtu不能过大
 		RTE_LOG(ERR, USER1, "%s(line=%u) invalid mtu=%u",
 			__func__, dst->line, dst->mtu);
@@ -431,7 +436,7 @@ parse_netbe_dest(struct netbe_dest *dst, const char *arg)
 	memset(val, 0, sizeof(val));
 	//这里改为RTE_DIM(hndl)-1更合适些（设置最后一个元素）
 	//mtu的默认值是jumbo-crc
-	val[4].u64 = ETHER_MAX_JUMBO_FRAME_LEN - ETHER_CRC_LEN;
+	val[4].u64 = RTE_ETHER_MAX_JUMBO_FRAME_LEN - RTE_ETHER_CRC_LEN;
 
 	rc = parse_kvargs(arg, keys_man, RTE_DIM(keys_man),
 		keys_opt, RTE_DIM(keys_opt), hndl, val);
@@ -846,7 +851,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 
 	optind = 0;
 	optarg = NULL;
-	while ((opt = getopt_long(argc, argv, "aB:C:c:LPR:S:TUb:f:s:v:H:K:W:w:",
+	while ((opt = getopt_long(argc, argv, "aB:C:c:LPR:S:M:TUb:f:s:v:H:K:W:w:",
 			long_opt, &opt_idx)) != EOF) {
 		if (opt == OPT_SHORT_ARP) {
 			cfg->arp = 1;
@@ -864,7 +869,13 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					"for option: \'%c\'\n",
 					__func__, optarg, opt);
 			ctx_prm->flags = v;
-		} else if (opt == OPT_SHORT_PROMISC) {
+		} else if (opt == OPT_SHORT_MBUFNUM) {
+			rc = parse_uint_val(NULL, optarg, &v);
+			if (rc < 0)
+				rte_exit(EXIT_FAILURE, "%s: invalid value: %s "
+					"for option: \'%c\'\n",
+					__func__, optarg, opt);
+			cfg->mpool_buf_num = v;
 		} else if (opt == OPT_SHORT_PROMISC) {
 			cfg->promisc = 1;
 		} else if (opt == OPT_SHORT_RBUFS) {

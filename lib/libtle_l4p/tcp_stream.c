@@ -28,6 +28,8 @@
 #include "tcp_ofo.h"
 #include "tcp_txq.h"
 
+#define MAX_STREAM_BURST	0x40
+
 static void
 unuse_stream(struct tle_tcp_stream *s)
 {
@@ -36,31 +38,19 @@ unuse_stream(struct tle_tcp_stream *s)
 }
 
 static void
-fini_stream(struct tle_tcp_stream *s)
-{
-	if (s != NULL) {
-		rte_free(s->rx.q);
-		tcp_ofo_free(s->rx.ofo);
-		rte_free(s->tx.q);
-		rte_free(s->tx.drb.r);
-	}
-}
-
-static void
 tcp_fini_streams(struct tle_ctx *ctx)
 {
-	uint32_t i;
 	struct tcp_streams *ts;
 
 	ts = CTX_TCP_STREAMS(ctx);
 	if (ts != NULL) {
-		stbl_fini(&ts->st);
-		for (i = 0; i != ctx->prm.max_streams; i++)
-			fini_stream(&ts->s[i]);
 
-		/* free the timer wheel */
+		stbl_fini(&ts->st);
 		tle_timer_free(ts->tmr);
 		rte_free(ts->tsq);
+		tle_memtank_dump(stdout, ts->mts, TLE_MTANK_DUMP_STAT);
+		tle_memtank_sanity_check(ts->mts, 0);
+		tle_memtank_destroy(ts->mts);
 
 		STAILQ_INIT(&ts->dr.fe);
 		STAILQ_INIT(&ts->dr.be);
@@ -94,79 +84,89 @@ alloc_ring(uint32_t n, uint32_t flags, int32_t socket)
 	return r;
 }
 
-static int
-init_stream(struct tle_ctx *ctx, struct tle_tcp_stream *s)
+static void
+calc_stream_szofs(struct tle_ctx *ctx, struct stream_szofs *szofs)
 {
-	size_t bsz, rsz, sz;
-	uint32_t f, i, k, n, nb;
+	uint32_t n, na, sz, tsz;
+
+	sz = sizeof(struct tle_tcp_stream);
+
+	n = RTE_MAX(ctx->prm.max_stream_rbufs, 1U);
+	tcp_ofo_calc_elems(n, &szofs->ofo.nb_obj, &szofs->ofo.nb_max, &tsz);
+	szofs->ofo.ofs = sz;
+
+	sz += tsz;
+	sz = RTE_ALIGN_CEIL(sz, RTE_CACHE_LINE_SIZE);
+
+	na = rte_align32pow2(n);
+	szofs->rxq.ofs = sz;
+	szofs->rxq.nb_obj = na;
+
+	sz += rte_ring_get_memsize(na);
+	sz = RTE_ALIGN_CEIL(sz, RTE_CACHE_LINE_SIZE);
+
+	n = RTE_MAX(ctx->prm.max_stream_sbufs, 1U);
+	na = rte_align32pow2(n);
+	szofs->txq.ofs = sz;
+	szofs->txq.nb_obj = na;
+
+	sz += rte_ring_get_memsize(na);
+	sz = RTE_ALIGN_CEIL(sz, RTE_CACHE_LINE_SIZE);
+
+	szofs->drb.nb_obj = drb_nb_elem(ctx);
+	szofs->drb.nb_max = calc_stream_drb_num(ctx, szofs->drb.nb_obj);
+	szofs->drb.nb_rng = rte_align32pow2(szofs->drb.nb_max);
+	szofs->drb.rng_sz = rte_ring_get_memsize(szofs->drb.nb_rng);
+	szofs->drb.blk_sz = tle_drb_calc_size(szofs->drb.nb_obj);
+	szofs->drb.ofs = sz;
+
+	sz += szofs->drb.rng_sz + szofs->drb.blk_sz * szofs->drb.nb_max;
+	sz = RTE_ALIGN_CEIL(sz, RTE_CACHE_LINE_SIZE);
+
+	szofs->size = sz;
+}
+
+static void
+init_stream(struct tle_ctx *ctx, struct tle_tcp_stream *s,
+	const struct stream_szofs *szofs)
+{
+	uint32_t f, i;
 	struct tle_drb *drb;
-	char name[RTE_RING_NAMESIZE];
 
 	f = ((ctx->prm.flags & TLE_CTX_FLAG_ST) == 0) ? 0 :
 		(RING_F_SP_ENQ |  RING_F_SC_DEQ);
 
 	/* init RX part. */
 
-	n = RTE_MAX(ctx->prm.max_stream_rbufs, 1U);
-	s->rx.q = alloc_ring(n, f | RING_F_SP_ENQ, ctx->prm.socket_id);
-	if (s->rx.q == NULL)
-		return -ENOMEM;
+	s->rx.ofo = (void *)((uintptr_t)s + szofs->ofo.ofs);
+	tcp_ofo_init(s->rx.ofo, szofs->ofo.nb_obj, szofs->ofo.nb_max);
 
-	s->rx.ofo = tcp_ofo_alloc(n, ctx->prm.socket_id);
-	if (s->rx.ofo == NULL)
-		return -ENOMEM;
+	s->rx.q = (void *)((uintptr_t)s + szofs->rxq.ofs);
+	rte_ring_init(s->rx.q, __func__, szofs->rxq.nb_obj, f | RING_F_SP_ENQ);
 
 	/* init TX part. */
 
-	n = RTE_MAX(ctx->prm.max_stream_sbufs, 1U);
-	s->tx.q = alloc_ring(n, f | RING_F_SC_DEQ, ctx->prm.socket_id);
-	if (s->tx.q == NULL)
-		return -ENOMEM;
+	s->tx.q = (void *)((uintptr_t)s + szofs->txq.ofs);
+	rte_ring_init(s->tx.q, __func__, szofs->txq.nb_obj, f | RING_F_SC_DEQ);
 
-	nb = drb_nb_elem(ctx);
-	k = calc_stream_drb_num(ctx, nb);
-	n = rte_align32pow2(k);
+	s->tx.drb.r = (void *)((uintptr_t)s + szofs->drb.ofs);
+	rte_ring_init(s->tx.drb.r, __func__, szofs->drb.nb_rng, f);
 
-	/* size of the drbs ring */
-	rsz = rte_ring_get_memsize(n);
-	rsz = RTE_ALIGN_CEIL(rsz, RTE_CACHE_LINE_SIZE);
-
-	/* size of the drb. */
-	bsz = tle_drb_calc_size(nb);
-
-	/* total stream drbs size. */
-	sz = rsz + bsz * k;
-
-	s->tx.drb.r = rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE,
-		ctx->prm.socket_id);
-	if (s->tx.drb.r == NULL) {
-		TCP_LOG(ERR, "%s(%p): allocation of %zu bytes on socket %d "
-			"failed with error code: %d\n",
-			__func__, s, sz, ctx->prm.socket_id, rte_errno);
-		return -ENOMEM;
-	}
-
-	snprintf(name, sizeof(name), "%p@%zu", s, sz);
-	rte_ring_init(s->tx.drb.r, name, n, f);
-
-	for (i = 0; i != k; i++) {
+	for (i = 0; i != szofs->drb.nb_max; i++) {
 		drb = (struct tle_drb *)((uintptr_t)s->tx.drb.r +
-			rsz + bsz * i);
+			szofs->drb.rng_sz + szofs->drb.blk_sz * i);
 		drb->udata = s;
-		drb->size = nb;
+		drb->size = szofs->drb.nb_obj;
 		rte_ring_enqueue(s->tx.drb.r, drb);
 	}
 
-	s->tx.drb.nb_elem = nb;
-	s->tx.drb.nb_max = k;
+	s->tx.drb.nb_elem = szofs->drb.nb_obj;
+	s->tx.drb.nb_max = szofs->drb.nb_max;
 
 	/* mark stream as avaialble to use. */
 
 	s->s.ctx = ctx;
 	unuse_stream(s);
-	STAILQ_INSERT_TAIL(&ctx->streams.free, &s->s, link);
-
-	return 0;
 }
 
 static void
@@ -179,36 +179,111 @@ tcp_free_drbs(struct tle_stream *s, struct tle_drb *drb[], uint32_t nb_drb)
 }
 
 static struct tle_timer_wheel *
-alloc_timers(uint32_t num, uint32_t mshift, int32_t socket)
+alloc_timers(const struct tle_ctx *ctx)
 {
+	struct tle_timer_wheel *twl;
 	struct tle_timer_wheel_args twprm;
 
 	twprm.tick_size = TCP_RTO_GRANULARITY;
-	twprm.max_timer = num;
-	twprm.socket_id = socket;
-	return tle_timer_create(&twprm, tcp_get_tms(mshift));
+	twprm.max_timer = ctx->prm.max_streams;
+	twprm.socket_id = ctx->prm.socket_id;
+
+	twl = tle_timer_create(&twprm, tcp_get_tms(ctx->cycles_ms_shift));
+	if (twl == NULL)
+		TCP_LOG(ERR, "alloc_timers(ctx=%p) failed with error=%d\n",
+			ctx, rte_errno);
+	return twl;
+}
+
+static void *
+mts_alloc(size_t sz, void *udata)
+{
+	struct tle_ctx *ctx;
+
+	ctx = udata;
+	return rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE,
+		ctx->prm.socket_id);
+}
+
+static void
+mts_free(void *p, void *udata)
+{
+	RTE_SET_USED(udata);
+	rte_free(p);
+}
+
+static void
+mts_init(void *pa[], uint32_t num, void *udata)
+{
+	uint32_t i;
+	struct tle_ctx *ctx;
+	struct tcp_streams *ts;
+
+	ctx = udata;
+	ts = CTX_TCP_STREAMS(ctx);
+
+	for (i = 0; i != num; i++)
+		init_stream(ctx, pa[i], &ts->szofs);
+}
+
+static struct tle_memtank *
+alloc_mts(struct tle_ctx *ctx, uint32_t stream_size)
+{
+	struct tle_memtank *mts;
+	struct tle_memtank_prm prm;
+
+	static const struct tle_memtank_prm cprm = {
+		.obj_align = RTE_CACHE_LINE_SIZE,
+		.flags = TLE_MTANK_OBJ_DBG,
+		.alloc = mts_alloc,
+		.free = mts_free,
+		.init = mts_init,
+	};
+
+	prm = cprm;
+	prm.udata = ctx;
+
+	prm.obj_size = stream_size;
+
+	prm.min_free = (ctx->prm.free_streams.min != 0) ?
+		ctx->prm.free_streams.min : ctx->prm.max_streams;
+	prm.max_free = (ctx->prm.free_streams.max > prm.min_free) ?
+		ctx->prm.free_streams.max : prm.min_free;
+
+	prm.nb_obj_chunk = MAX_STREAM_BURST;
+	prm.max_obj = ctx->prm.max_streams;
+
+	mts = tle_memtank_create(&prm);
+	if (mts == NULL)
+		TCP_LOG(ERR, "%s(ctx=%p) failed with error=%d\n",
+			__func__, ctx, rte_errno);
+	else
+		tle_memtank_grow(mts);
+
+	return mts;
 }
 
 static int
 tcp_init_streams(struct tle_ctx *ctx)
 {
-	size_t sz;
-	uint32_t f, i;
+	uint32_t f;
 	int32_t rc;
 	struct tcp_streams *ts;
+	struct stream_szofs szofs;
 
 	f = ((ctx->prm.flags & TLE_CTX_FLAG_ST) == 0) ? 0 :
 		(RING_F_SP_ENQ |  RING_F_SC_DEQ);
 
-	sz = sizeof(*ts) + sizeof(ts->s[0]) * ctx->prm.max_streams;
-	ts = rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE,
+	calc_stream_szofs(ctx, &szofs);
+	TCP_LOG(NOTICE, "ctx:%p, caluclated stream size: %u\n",
+		ctx, szofs.size);
+
+	ts = rte_zmalloc_socket(NULL, sizeof(*ts), RTE_CACHE_LINE_SIZE,
 		ctx->prm.socket_id);
-	if (ts == NULL) {
-		TCP_LOG(ERR, "allocation of %zu bytes on socket %d "
-			"for %u tcp_streams failed\n",
-			sz, ctx->prm.socket_id, ctx->prm.max_streams);
+	if (ts == NULL)
 		return -ENOMEM;
-	}
+
+	ts->szofs = szofs;
 
 	STAILQ_INIT(&ts->dr.fe);
 	STAILQ_INIT(&ts->dr.be);
@@ -216,27 +291,22 @@ tcp_init_streams(struct tle_ctx *ctx)
 	ctx->streams.buf = ts;
 	STAILQ_INIT(&ctx->streams.free);
 
-	ts->tmr = alloc_timers(ctx->prm.max_streams, ctx->cycles_ms_shift,
-		ctx->prm.socket_id);
-	if (ts->tmr == NULL) {
-		TCP_LOG(ERR, "alloc_timers(ctx=%p) failed with error=%d\n",
-			ctx, rte_errno);
-		rc = -ENOMEM;
-	} else {
-		ts->tsq = alloc_ring(ctx->prm.max_streams,
-			f | RING_F_SC_DEQ, ctx->prm.socket_id);
-		if (ts->tsq == NULL)
+	rc = stbl_init(&ts->st, ctx->prm.max_streams, ctx->prm.socket_id);
+
+	if (rc == 0) {
+		ts->tsq = alloc_ring(ctx->prm.max_streams, f | RING_F_SC_DEQ,
+			ctx->prm.socket_id);
+		ts->tmr = alloc_timers(ctx);
+		ts->mts = alloc_mts(ctx, szofs.size);
+	
+		if (ts->tsq == NULL || ts->tmr == NULL || ts->mts == NULL)
 			rc = -ENOMEM;
-		else
-			rc = stbl_init(&ts->st, ctx->prm.max_streams,
-				ctx->prm.socket_id);
+
+		tle_memtank_dump(stdout, ts->mts, TLE_MTANK_DUMP_STAT);
 	}
 
-	for (i = 0; rc == 0 && i != ctx->prm.max_streams; i++)
-		rc = init_stream(ctx, &ts->s[i]);
-
 	if (rc != 0) {
-		TCP_LOG(ERR, "initalisation of %u-th stream failed", i);
+		TCP_LOG(ERR, "initalisation of tcp streams failed");
 		tcp_fini_streams(ctx);
 	}
 
@@ -296,6 +366,7 @@ struct tle_stream *
 tle_tcp_stream_open(struct tle_ctx *ctx,
 	const struct tle_tcp_stream_param *prm)
 {
+	struct tcp_streams *ts;
 	struct tle_tcp_stream *s;
 	int32_t rc;
 
@@ -304,15 +375,11 @@ tle_tcp_stream_open(struct tle_ctx *ctx,
 		return NULL;
 	}
 
-	s = (struct tle_tcp_stream *)get_stream(ctx);
-	if (s == NULL)	{
-		rte_errno = ENFILE;
-		return NULL;
+	ts = CTX_TCP_STREAMS(ctx);
 
-	/* some TX still pending for that stream. */
-	} else if (TCP_STREAM_TX_PENDING(s)) {
-		put_stream(ctx, &s->s, 0);
-		rte_errno = EAGAIN;
+	s = tcp_stream_get(ctx, TLE_MTANK_ALLOC_CHUNK | TLE_MTANK_ALLOC_GROW);
+	if (s == NULL) {
+		rte_errno = ENFILE;
 		return NULL;
 	}
 
@@ -322,7 +389,8 @@ tle_tcp_stream_open(struct tle_ctx *ctx,
 		(const struct sockaddr *)&prm->addr.remote);
 
 	if (rc != 0) {
-		put_stream(ctx, &s->s, 1);
+		tle_memtank_free(ts->mts, (void **)&s, 1,
+			TLE_MTANK_FREE_SHRINK);
 		rte_errno = rc;
 		return NULL;
 	}
@@ -420,18 +488,17 @@ tle_tcp_stream_close_bulk(struct tle_stream *ts[], uint32_t num)
 
 	rc = 0;
 
-	for (i = 0; i != num; i++) {
+	for (i = 0; i != num && rc == 0; i++) {
 
 		s = TCP_STREAM(ts[i]);
-		if (ts[i] == NULL || s->s.type >= TLE_VNUM) {
+		if (ts[i] == NULL || s->s.type >= TLE_VNUM)
 			rc = EINVAL;
-			break;
-		}
 
-		ctx = s->s.ctx;
-		rc = stream_close(ctx, s);
-		if (rc != 0)
-			break;
+		else {
+			ctx = s->s.ctx;
+			rc = stream_close(ctx, s);
+			tle_memtank_shrink(CTX_TCP_MTS(ctx));
+		}
 	}
 
 	if (rc != 0)
@@ -442,6 +509,7 @@ tle_tcp_stream_close_bulk(struct tle_stream *ts[], uint32_t num)
 int
 tle_tcp_stream_close(struct tle_stream *ts)
 {
+	int32_t rc;
 	struct tle_ctx *ctx;
 	struct tle_tcp_stream *s;
 
@@ -450,7 +518,9 @@ tle_tcp_stream_close(struct tle_stream *ts)
 		return -EINVAL;
 
 	ctx = s->s.ctx;
-	return stream_close(ctx, s);
+	rc = stream_close(ctx, s);
+	tle_memtank_shrink(CTX_TCP_MTS(ctx));
+	return rc;
 }
 
 int
@@ -506,6 +576,12 @@ tle_tcp_stream_listen(struct tle_stream *ts)
 	s = TCP_STREAM(ts);
 	if (ts == NULL || s->s.type >= TLE_VNUM)
 		return -EINVAL;
+
+	/* app may listen for multiple times to change backlog,
+	 * we will just return success for such cases.
+	 */
+	if (s->tcb.state == TCP_ST_LISTEN)
+		return 0;
 
 	/* mark stream as not closable. */
 	if (tcp_stream_try_acquire(s) > 0) {

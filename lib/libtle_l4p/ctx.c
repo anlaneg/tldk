@@ -117,8 +117,6 @@ tle_ctx_create(const struct tle_ctx_param *ctx_prm)
 	for (i = 0; i != RTE_DIM(ctx->use); i++)
 		tle_pbm_init(ctx->use + i, LPORT_START_BLK);
 
-	ctx->streams.nb_free = ctx->prm.max_streams;
-
 	/* Initialization of siphash state is done here to speed up the
 	 * fastpath processing.
 	 */
@@ -238,20 +236,6 @@ tle_add_dev(struct tle_ctx *ctx, const struct tle_dev_param *dev_prm)
 		rte_free(dev->dp[TLE_V6]);
 		rte_errno = rc;
 		return NULL;
-	}
-
-	/* setup RX data. */
-	if (dev_prm->local_addr4.s_addr != INADDR_ANY &&
-			(dev_prm->rx_offload & DEV_RX_OFFLOAD_IPV4_CKSUM) == 0)
-		dev->rx.ol_flags[TLE_V4] |= PKT_RX_IP_CKSUM_BAD;
-
-	if (((dev_prm->rx_offload & DEV_RX_OFFLOAD_UDP_CKSUM) == 0 &&
-			ctx->prm.proto == TLE_PROTO_UDP) ||
-			((dev_prm->rx_offload &
-			DEV_RX_OFFLOAD_TCP_CKSUM) == 0 &&
-			ctx->prm.proto == TLE_PROTO_TCP)) {
-		dev->rx.ol_flags[TLE_V4] |= PKT_RX_L4_CKSUM_BAD;
-		dev->rx.ol_flags[TLE_V6] |= PKT_RX_L4_CKSUM_BAD;
 	}
 
 	/* setup TX data. */

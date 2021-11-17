@@ -94,7 +94,7 @@ CXXFLAGS += -I$(RTE_OUTPUT)/include
 CXXFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -lstdc++
-LDFLAGS += -L$(GMOCK_DIR) -lgmock
+LDFLAGS += -L$(GMOCK_DIR) -L$(GMOCK_DIR)/../lib -lgmock
 LDLIBS += -whole-archive -ltle_l4p -ltle_dring
 
 include $(TLDK_ROOT)/mk/tle.cpp-obj.mk
@@ -122,10 +122,10 @@ CFLAGS += $(WERROR_FLAGS)
 LDLIBS += gtest-rfc.o
 
 LDLIBS += -lstdc++
-LDLIBS += -L$(GMOCK_DIR) -lgmock
-LDLIBS += -L$(GMOCK_DIR)/gtest -lgtest
+LDLIBS += -L$(GMOCK_DIR) -L$(GMOCK_DIR)/../lib -lgmock
+LDLIBS += -L$(GMOCK_DIR)/gtest -L$(GMOCK_DIR)/../lib -lgtest
 LDLIBS += -L$(RTE_OUTPUT)/lib
-LDLIBS += -whole-archive -ltle_l4p -ltle_dring -ltle_timer
+LDLIBS += -whole-archive -ltle_l4p -ltle_dring -ltle_memtank -ltle_timer
 
 include $(TLDK_ROOT)/mk/tle.app.mk
 endif

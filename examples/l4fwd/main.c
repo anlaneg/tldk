@@ -61,17 +61,12 @@ RTE_DEFINE_PER_LCORE(struct netfe_lcore *, _fe);
 
 static volatile int force_quit;
 
-static struct netbe_cfg becfg;
+static struct netbe_cfg becfg = {.mpool_buf_num=MPOOL_NB_BUF};
 static struct rte_mempool *mpool[RTE_MAX_NUMA_NODES + 1];
 static struct rte_mempool *frag_mpool[RTE_MAX_NUMA_NODES + 1];
 static char proto_name[3][10] = {"udp", "tcp", ""};
 
-static const struct rte_eth_conf port_conf_default = {
-	.rxmode = {
-		.hw_vlan_strip = 1,
-		.jumbo_frame = 0,
-	},
-};
+static const struct rte_eth_conf port_conf_default;
 
 struct tx_content tx_content = {
 	.sz = 0,

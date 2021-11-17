@@ -38,7 +38,7 @@ union parse_val {
 			struct in6_addr addr6;
 		};
 	} in;
-	struct ether_addr mac;
+	struct rte_ether_addr mac;
 	rte_cpuset_t cpuset;
 };
 
@@ -163,7 +163,7 @@ tldk_port_parse(ngx_conf_t *cf, struct tldk_port_conf *prt)
 	union parse_val pvl[RTE_DIM(kh)];
 
 	memset(pvl, 0, sizeof(pvl));
-	pvl[1].u64 = ETHER_MAX_LEN - ETHER_CRC_LEN;
+	pvl[1].u64 = RTE_ETHER_MAX_LEN - RTE_ETHER_CRC_LEN;
 
 	if (cf->args->nelts % 2 != 0)
 		return NGX_CONF_ERROR;
@@ -286,7 +286,7 @@ tldk_dest_parse(ngx_conf_t *cf, struct tldk_dest_conf *dst)
 	union parse_val pvl[RTE_DIM(kh)];
 
 	memset(pvl, 0, sizeof(pvl));
-	pvl[1].u64 = ETHER_MAX_LEN - ETHER_CRC_LEN;
+	pvl[1].u64 = RTE_ETHER_MAX_LEN - RTE_ETHER_CRC_LEN;
 
 	if (cf->args->nelts % 2 != 1 || cf->args->nelts == 1)
 		return NGX_CONF_ERROR;
@@ -413,6 +413,18 @@ tldk_ctx_parse(ngx_conf_t *cf, ngx_command_t *dummy, void *conf)
 					&pvl) < 0)
 			return NGX_CONF_ERROR;
 		tcx->nb_stream = pvl.u64;
+	} else if (ngx_strcmp(v[0].data, "min_free_streams") == 0) {
+		if (cf->args->nelts != 2 ||
+				parse_uint_val((const char *)v[1].data,
+					&pvl) < 0)
+			return NGX_CONF_ERROR;
+		tcx->free_streams.nb_min = pvl.u64;
+	} else if (ngx_strcmp(v[0].data, "max_free_streams") == 0) {
+		if (cf->args->nelts != 2 ||
+				parse_uint_val((const char *)v[1].data,
+					&pvl) < 0)
+			return NGX_CONF_ERROR;
+		tcx->free_streams.nb_max = pvl.u64;
 	} else if (ngx_strcmp(v[0].data, "rbufs") == 0) {
 		if (cf->args->nelts != 2 ||
 				parse_uint_val((const char *)v[1].data,

@@ -180,15 +180,17 @@ port_init(struct netbe_port *uprt, uint32_t proto)
 	if ((uprt->rx_offload & RX_CSUM_OFFLOAD) != 0) {
 		RTE_LOG(ERR, USER1, "%s(%u): enabling RX csum offload;\n",
 			__func__, uprt->id);
-		port_conf.rxmode.hw_ip_checksum = 1;
+		port_conf.rxmode.offloads |= uprt->rx_offload & RX_CSUM_OFFLOAD;
 	}
-	port_conf.rxmode.max_rx_pkt_len = uprt->mtu + ETHER_CRC_LEN;
-	if (port_conf.rxmode.max_rx_pkt_len > ETHER_MAX_LEN)
-		port_conf.rxmode.jumbo_frame = 1;
+	port_conf.rxmode.max_rx_pkt_len = uprt->mtu + RTE_ETHER_CRC_LEN;
+	if (port_conf.rxmode.max_rx_pkt_len > RTE_ETHER_MAX_LEN)
+		port_conf.rxmode.offloads |= DEV_RX_OFFLOAD_JUMBO_FRAME;
 
 	rc = update_rss_conf(uprt, &dev_info, &port_conf, proto);
 	if (rc != 0)
 		return rc;
+
+	port_conf.txmode.offloads = uprt->tx_offload;
 
 	rc = rte_eth_dev_configure(uprt->id, uprt->nb_lcore, uprt->nb_lcore,
 			&port_conf);
@@ -220,11 +222,6 @@ queue_init(struct netbe_port *uprt, struct rte_mempool *mp)
 	nb_txd = RTE_MIN(TX_RING_SIZE, dev_info.tx_desc_lim.nb_max);
 
 	dev_info.default_txconf.tx_free_thresh = nb_txd / 2;
-	if (uprt->tx_offload != 0) {
-		RTE_LOG(ERR, USER1, "%s(%u): enabling full featured TX;\n",
-			__func__, uprt->id);
-		dev_info.default_txconf.txq_flags = 0;
-	}
 
 	for (q = 0; q < uprt->nb_lcore; q++) {
 		rc = rte_eth_rx_queue_setup(uprt->id, q, nb_rxd,
@@ -261,8 +258,7 @@ check_lcore(uint32_t lc)
 		return -EINVAL;
 	}
 	if (rte_eal_get_lcore_state(lc) == RUNNING) {
-		RTE_LOG(ERR, USER1, "lcore %u already running %p\n",
-			lc, lcore_config[lc].f);
+		RTE_LOG(ERR, USER1, "lcore %u already in use\n", lc);
 		return -EINVAL;
 	}
 	return 0;
@@ -319,14 +315,14 @@ log_netbe_cfg(const struct netbe_cfg *ucfg)
 }
 
 static int
-pool_init(uint32_t sid)
+pool_init(uint32_t sid, uint32_t mpool_buf_num)
 {
 	int32_t rc;
 	struct rte_mempool *mp;
 	char name[RTE_MEMPOOL_NAMESIZE];
 
 	snprintf(name, sizeof(name), "MP%u", sid);
-	mp = rte_pktmbuf_pool_create(name, MPOOL_NB_BUF, MPOOL_CACHE_SIZE, 0,
+	mp = rte_pktmbuf_pool_create(name, mpool_buf_num, MPOOL_CACHE_SIZE, 0,
 		RTE_MBUF_DEFAULT_BUF_SIZE, sid - 1);
 	if (mp == NULL) {
 		rc = -rte_errno;
@@ -340,14 +336,14 @@ pool_init(uint32_t sid)
 }
 
 static int
-frag_pool_init(uint32_t sid)
+frag_pool_init(uint32_t sid, uint32_t mpool_buf_num)
 {
 	int32_t rc;
 	struct rte_mempool *frag_mp;
 	char frag_name[RTE_MEMPOOL_NAMESIZE];
 
 	snprintf(frag_name, sizeof(frag_name), "frag_MP%u", sid);
-	frag_mp = rte_pktmbuf_pool_create(frag_name, MPOOL_NB_BUF,
+	frag_mp = rte_pktmbuf_pool_create(frag_name, mpool_buf_num,
 		MPOOL_CACHE_SIZE, 0, FRAG_MBUF_BUF_SIZE, sid - 1);
 	if (frag_mp == NULL) {
 		rc = -rte_errno;
@@ -412,13 +408,13 @@ netbe_port_init(struct netbe_cfg *cfg)
 			assert(sid < RTE_DIM(mpool));
 
 			if (mpool[sid] == NULL) {
-				rc = pool_init(sid);
+				rc = pool_init(sid, cfg->mpool_buf_num);
 				if (rc != 0)
 					return rc;
 			}
 
 			if (frag_mpool[sid] == NULL) {
-				rc = frag_pool_init(sid);
+				rc = frag_pool_init(sid, cfg->mpool_buf_num);
 				if (rc != 0)
 					return rc;
 			}

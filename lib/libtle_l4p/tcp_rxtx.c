@@ -199,7 +199,7 @@ get_ip_pid(struct tle_dev *dev, uint32_t num, uint32_t type, uint32_t st)
 }
 
 static inline void
-fill_tcph(struct tcp_hdr *l4h, const struct tcb *tcb, union l4_ports port,
+fill_tcph(struct rte_tcp_hdr *l4h, const struct tcb *tcb, union l4_ports port,
 	uint32_t seq, uint8_t hlen, uint8_t flags)
 {
 	uint16_t wnd;
@@ -237,7 +237,7 @@ tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
 	uint32_t pid, uint32_t swcsm)//ip层报文id号，swcsm软件是否需要计算checksum
 {
 	uint32_t l4, len, plen;
-	struct tcp_hdr *l4h;
+	struct rte_tcp_hdr *l4h;
 	char *l2h;
 
 	len = dst->l2_len + dst->l3_len;
@@ -260,7 +260,7 @@ tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
 	rte_memcpy(l2h, dst->hdr, len);//自dst中copy l2与l3的头部(常用字段，非全部字段）
 
 	/* setup TCP header & options */
-	l4h = (struct tcp_hdr *)(l2h + len);
+	l4h = (struct rte_tcp_hdr *)(l2h + len);
 	fill_tcph(l4h, &s->tcb, port, seq, l4, flags);//设置tcp头部及选项
 
 	/* setup mbuf TX offload related fields. */
@@ -270,9 +270,9 @@ tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
 	/* update proto specific fields. */
 
 	if (s->s.type == TLE_V4) {
-		struct ipv4_hdr *l3h;
+		struct rte_ipv4_hdr *l3h;
 		//填充id,total_length,cksum,
-		l3h = (struct ipv4_hdr *)(l2h + dst->l2_len);
+		l3h = (struct rte_ipv4_hdr *)(l2h + dst->l2_len);
 		l3h->packet_id = rte_cpu_to_be_16(pid);
 		l3h->total_length = rte_cpu_to_be_16(plen + dst->l3_len + l4);
 
@@ -285,8 +285,8 @@ tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
 		if ((ol_flags & PKT_TX_IP_CKSUM) == 0 && swcsm != 0)
 			l3h->hdr_checksum = _ipv4x_cksum(l3h, m->l3_len);
 	} else {
-		struct ipv6_hdr *l3h;
-		l3h = (struct ipv6_hdr *)(l2h + dst->l2_len);
+		struct rte_ipv6_hdr *l3h;
+		l3h = (struct rte_ipv6_hdr *)(l2h + dst->l2_len);
 		l3h->payload_len = rte_cpu_to_be_16(plen + l4);
 		if ((ol_flags & PKT_TX_TCP_CKSUM) != 0)
 			l4h->cksum = rte_ipv6_phdr_cksum(l3h, ol_flags);
@@ -307,11 +307,11 @@ static inline void
 tcp_update_mbuf(struct rte_mbuf *m, uint32_t type, const struct tcb *tcb,
 	uint32_t seq, uint32_t pid)
 {
-	struct tcp_hdr *l4h;
+	struct rte_tcp_hdr *l4h;
 	uint32_t len;
 
 	len = m->l2_len + m->l3_len;
-	l4h = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *, len);
+	l4h = rte_pktmbuf_mtod_offset(m, struct rte_tcp_hdr *, len);
 
 	l4h->sent_seq = rte_cpu_to_be_32(seq);
 	l4h->recv_ack = rte_cpu_to_be_32(tcb->rcv.nxt);
@@ -320,8 +320,9 @@ tcp_update_mbuf(struct rte_mbuf *m, uint32_t type, const struct tcb *tcb,
 		fill_tms_opts(l4h + 1, tcb->snd.ts, tcb->rcv.ts);
 
 	if (type == TLE_V4) {
-		struct ipv4_hdr *l3h;
-		l3h = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, m->l2_len);
+		struct rte_ipv4_hdr *l3h;
+		l3h = rte_pktmbuf_mtod_offset(m, struct rte_ipv4_hdr *,
+			m->l2_len);
 		l3h->hdr_checksum = 0;
 		l3h->packet_id = rte_cpu_to_be_16(pid);
 		if ((m->ol_flags & PKT_TX_IP_CKSUM) == 0)
@@ -334,14 +335,14 @@ tcp_update_mbuf(struct rte_mbuf *m, uint32_t type, const struct tcb *tcb,
 		l4h->cksum = 0;
 
 		if (type == TLE_V4) {
-			struct ipv4_hdr *l3h;
-			l3h = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *,
+			struct rte_ipv4_hdr *l3h;
+			l3h = rte_pktmbuf_mtod_offset(m, struct rte_ipv4_hdr *,
 				m->l2_len);
 			l4h->cksum = _ipv4_udptcp_mbuf_cksum(m, len, l3h);
 
 		} else {
-			struct ipv6_hdr *l3h;
-			l3h = rte_pktmbuf_mtod_offset(m, struct ipv6_hdr *,
+			struct rte_ipv6_hdr *l3h;
+			l3h = rte_pktmbuf_mtod_offset(m, struct rte_ipv6_hdr *,
 				m->l2_len);
 			l4h->cksum = _ipv6_udptcp_mbuf_cksum(m, len, l3h);
 		}
@@ -495,10 +496,9 @@ tx_nxt_data(struct tle_tcp_stream *s, uint32_t tms)
 static inline void
 free_una_data(struct tle_tcp_stream *s, uint32_t len)
 {
-	uint32_t i, n, num, plen;
+	uint32_t i, num, plen;
 	struct rte_mbuf **mi;
 
-	n = 0;
 	plen = 0;
 
 	do {
@@ -509,12 +509,14 @@ free_una_data(struct tle_tcp_stream *s, uint32_t len)
 			break;
 
 		/* free acked data */
-		for (i = 0; i != num && n != len; i++, n = plen) {
-			plen += PKT_L4_PLEN(mi[i]);
-			if (plen > len) {
+		for (i = 0; i != num && plen != len; i++) {
+			uint32_t next_pkt_len = PKT_L4_PLEN(mi[i]);
+			if (plen + next_pkt_len > len) {
 				/* keep SND.UNA at the start of the packet */
-				len -= RTE_MIN(len, plen - len);
+				len = plen;
 				break;
+			} else {
+				plen += next_pkt_len;
 			}
 			rte_pktmbuf_free(mi[i]);
 		}
@@ -659,7 +661,7 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	struct tle_dev *dev;
 	const void *da;
 	struct tle_dest dst;
-	const struct tcp_hdr *th;
+	const struct rte_tcp_hdr *th;
 
 	type = s->s.type;
 
@@ -676,10 +678,14 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 		return rc;
 
 	//取tcp头部指针
-	th = rte_pktmbuf_mtod_offset(m, const struct tcp_hdr *,
+	th = rte_pktmbuf_mtod_offset(m, const struct rte_tcp_hdr *,
 		m->l2_len + m->l3_len);
 	//取tcp syn包中的选项
 	get_syn_opts(&s->tcb.so, (uintptr_t)(th + 1), m->l4_len - sizeof(*th));
+
+	/* reset wscale option if timestamp is not present */
+	if (s->tcb.so.ts.val == 0)
+		s->tcb.so.wscale = 0;
 
 	s->tcb.rcv.nxt = si->seq + 1;//syn报文序号加1
 	//生成一个seq（由于syn flood问题，需要考虑时间，需要考虑mss)
@@ -742,7 +748,7 @@ rx_tms_opt(const struct tcb *tcb, const struct rte_mbuf *mb)
 {
 	union tsopt ts;
 	uintptr_t opt;
-	const struct tcp_hdr *th;
+	const struct rte_tcp_hdr *th;
 
 	if (tcb->so.ts.val != 0) {
 		opt = rte_pktmbuf_mtod_offset(mb, uintptr_t,
@@ -814,7 +820,7 @@ restore_syn_opt(union seg_info *si, union tsopt *to,
 {
 	int32_t rc;
 	uint32_t len;
-	const struct tcp_hdr *th;
+	const struct rte_tcp_hdr *th;
 
 	/* check that ACK, etc fields are what we expected. */
 	rc = sync_check_ack(pi, si->seq, si->ack - 1, ts,
@@ -825,7 +831,7 @@ restore_syn_opt(union seg_info *si, union tsopt *to,
 
 	si->mss = rc;
 
-	th = rte_pktmbuf_mtod_offset(mb, const struct tcp_hdr *,
+	th = rte_pktmbuf_mtod_offset(mb, const struct rte_tcp_hdr *,
 		mb->l2_len + mb->l3_len);
 	len = mb->l4_len - sizeof(*th);
 	to[0] = get_tms_opts((uintptr_t)(th + 1), len);
@@ -984,15 +990,16 @@ rx_ack_listen(struct tle_tcp_stream *s, struct stbl *st,
 		return rc;
 
 	/* allocate new stream */
-	ts = get_stream(ctx);
-	cs = TCP_STREAM(ts);//由tle_stream获取tle_tcp_stream
-	if (ts == NULL)
+	//由tle_stream获取tle_tcp_stream
+	cs = tcp_stream_get(ctx, 0);
+	if (cs == NULL)
 		return ENFILE;
 
 	/* prepare stream to handle new connection */
 	if (accept_prep_stream(s, st, cs, &to, tms, pi, si) == 0) {
 
 		/* put new stream in the accept queue */
+		ts = &cs->s;
 		if (_rte_ring_enqueue_burst(s->rx.q,
 				(void * const *)&ts, 1) == 1) {
 			*csp = cs;
@@ -1010,7 +1017,7 @@ rx_ack_listen(struct tle_tcp_stream *s, struct stbl *st,
 }
 
 static inline int
-data_pkt_adjust(const struct tcb *tcb, struct rte_mbuf *mb, uint32_t hlen,
+data_pkt_adjust(const struct tcb *tcb, struct rte_mbuf **mb, uint32_t hlen,
 	uint32_t *seqn, uint32_t *plen)
 {
 	uint32_t len, n, seq;
@@ -1018,7 +1025,7 @@ data_pkt_adjust(const struct tcb *tcb, struct rte_mbuf *mb, uint32_t hlen,
 	seq = *seqn;
 	len = *plen;
 
-	rte_pktmbuf_adj(mb, hlen);
+	rte_pktmbuf_adj(*mb, hlen);
 	if (len == 0)
 		return -ENODATA;
 	/* cut off the start of the packet */
@@ -1027,7 +1034,7 @@ data_pkt_adjust(const struct tcb *tcb, struct rte_mbuf *mb, uint32_t hlen,
 		if (n >= len)
 			return -ENODATA;
 
-		rte_pktmbuf_adj(mb, n);
+		*mb = _rte_pktmbuf_adj(*mb, n);
 		*seqn = seq + n;
 		*plen = len - n;
 	}
@@ -1134,7 +1141,7 @@ rx_fin(struct tle_tcp_stream *s, uint32_t state,
 
 	if (plen != 0) {
 
-		ret = data_pkt_adjust(&s->tcb, mb, hlen, &seq, &plen);
+		ret = data_pkt_adjust(&s->tcb, &mb, hlen, &seq, &plen);
 		if (ret != 0)
 			return ret;
 		if (rx_data_enqueue(s, seq, plen, &mb, 1) != 1)
@@ -1343,7 +1350,7 @@ rx_data_ack(struct tle_tcp_stream *s, struct dack_info *tack,
 
 		if (ret == 0) {
 			/* skip duplicate data, if any */
-			ret = data_pkt_adjust(&s->tcb, mb[i], hlen,
+			ret = data_pkt_adjust(&s->tcb, &mb[i], hlen,
 				&seq, &plen);
 		}
 
@@ -1370,20 +1377,16 @@ rx_data_ack(struct tle_tcp_stream *s, struct dack_info *tack,
 			ret = rx_check_seqack(&s->tcb, si[j].seq, si[j].ack,
 				plen, ts);
 
+			if (ret != 0)
+				break;
+
 			/* account for segment received */
 			ack_info_update(tack, &si[j], ret != 0, plen, ts);
 
-			if (ret != 0) {
-				rp[k] = mb[j];
-				rc[k] = -ret;
-				k++;
-				break;
-			}
 			rte_pktmbuf_adj(mb[j], hlen);
 		}
 
 		n = j - i;
-		j += (ret != 0);
 
 		/* account for OFO data */
 		if (seq != s->tcb.rcv.nxt)
@@ -1593,20 +1596,26 @@ rx_synack(struct tle_tcp_stream *s, uint32_t ts, uint32_t state,
 	struct resp_info *rsp)
 {
 	struct syn_opts so;
-	struct tcp_hdr *th;
+	struct rte_tcp_hdr *th;
 
 	if (state != TCP_ST_SYN_SENT)
 		return -EINVAL;//收到syn+ack时，本端一定发送了syn,丢包
 
-	/* invalid SEG.SEQ */
+	/*
+	 * RFC 793 3.9: in the SYN-SENT state
+	 * If SEG.ACK =< ISS, or SEG.ACK > SND.NXT, send a reset
+	 * <SEQ=SEG.ACK><CTL=RST>
+	 * and discard the segment.
+	 * The connection remains in the same state.
+	 */
 	//收到的syn+ack确认的ack序号不正确，回复rst
 	if (si->ack != (uint32_t)s->tcb.snd.nxt) {
-		rsp->flags = TCP_FLAG_RST;
+		send_rst(s, si->ack);
 		return 0;
 	}
 
 	//偏移到tcphdr
-	th = rte_pktmbuf_mtod_offset(mb, struct tcp_hdr *,
+	th = rte_pktmbuf_mtod_offset(mb, struct rte_tcp_hdr *,
 		mb->l2_len + mb->l3_len);
 	//解析其对应的tcp选项
 	get_syn_opts(&so, (uintptr_t)(th + 1), mb->l4_len - sizeof(*th));
@@ -1762,11 +1771,7 @@ rx_stream(struct tle_tcp_stream *s, uint32_t ts,
 		i = 0;
 
 	/* we have a response packet to send. */
-	//需要回复rst报文
-	if (rsp.flags == TCP_FLAG_RST) {
-		send_rst(s, si[i].ack);//发送rst报文
-		stream_term(s);//断开term
-	} else if (rsp.flags != 0) {
+	if (rsp.flags != 0) {
 		send_ack(s, ts, rsp.flags);
 
 		/* start the timer for FIN packet */
@@ -1954,7 +1959,6 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 	struct stbl *st;
 	struct tle_ctx *ctx;
 	uint32_t i, j, k, mt, n, t, ts;
-	uint64_t csf;
 	union pkt_info pi[num];
 	union seg_info si[num];
 	union {
@@ -1977,18 +1981,7 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 		get_pkt_info(pkt[i], &pi[i], &si[i]);
 
 		t = pi[i].tf.type;
-		//如果网卡收包时，报ip checksum有误，或者l4层checksum有误
-		//将返回非0
-		csf = dev->rx.ol_flags[t] &
-			(PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_BAD);
-
-		/* check csums in SW */
-		//check sum检查，如果硬件认为bad或者未填写checksump或者软件校验
-		//check sum后认为非0均认为checksum失效，置csf
-		if (pi[i].csf == 0 && csf != 0 && check_pkt_csum(pkt[i], csf,
-				pi[i].tf.type, IPPROTO_TCP) != 0)
-			pi[i].csf = csf;
-
+		pi[i].csf = check_pkt_csum(pkt[i], pi[i].csf, t, IPPROTO_TCP);
 		stu.t[t] = mt;
 	}
 
@@ -2041,11 +2034,14 @@ tle_tcp_stream_accept(struct tle_stream *ts, struct tle_stream *rs[],
 {
 	uint32_t n;
 	struct tle_tcp_stream *s;
+	struct tle_memtank *mts;
 
 	s = TCP_STREAM(ts);
 	n = _rte_ring_dequeue_burst(s->rx.q, (void **)rs, num);
 	if (n == 0)
 		return 0;
+
+	mts = CTX_TCP_MTS(ts->ctx);
 
 	/*
 	 * if we still have packets to read,
@@ -2057,6 +2053,7 @@ tle_tcp_stream_accept(struct tle_stream *ts, struct tle_stream *rs[],
 		tcp_stream_release(s);
 	}
 
+	tle_memtank_grow(mts);
 	return n;
 }
 
@@ -2675,7 +2672,7 @@ rto_stream(struct tle_tcp_stream *s, uint32_t tms)
 		timer_restart(s);
 
 	} else {
-		send_rst(s, s->tcb.snd.una);
+		send_rst(s, s->tcb.snd.nxt);
 		stream_term(s);
 	}
 }
