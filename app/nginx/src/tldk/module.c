@@ -39,6 +39,7 @@
 extern ngx_module_t ngx_tldk_module;
 
 /* map from ngx_worker to corresponding TLDK ctx */
+/*每个ngx_worker对应一个ctx*/
 struct tldk_ctx wrk2ctx[RTE_MAX_LCORE] = {};
 
 /* per be lcore tldk_ctx(s) */
@@ -86,6 +87,7 @@ init_context(struct tldk_ctx *tcx, const struct tldk_ctx_conf *cf,
 	struct tle_ctx_param cprm;
 
 	lc = cf->lcore;
+	/*lpm模块初始化*/
 	sid = rte_lcore_to_socket_id(lc);
 	rc = be_lcore_lpm_init(tcx, sid, cf);
 	if (rc != 0)
@@ -194,11 +196,13 @@ process_conf(tldk_conf_t *cf)
 	 */
 	for (i = 0; i < cf->nb_ctx; i++) {
 		ctx = &cf->ctx[i];
+		/*遍历当前ctx中配置的dev情况*/
 		for (j = 0; j < ctx->nb_dev; j++) {
 			port_id = ctx->dev[j].port;
 			queue_id = ctx->dev[j].queue;
 			pcf = &cf->port[port_id];
 
+			/*queue配置不得大于最大值*/
 			if (queue_id >= MAX_PORT_QUEUE)
 				return -EINVAL;
 
@@ -208,7 +212,7 @@ process_conf(tldk_conf_t *cf)
 				/* tldk_port_conf already has the queue */
 				return -EEXIST;
 
-			pcf->queue_map |= mask;
+			pcf->queue_map |= mask;/*指明此queue被使用*/
 			if (pcf->nb_queues <= queue_id)
 				pcf->nb_queues = queue_id + 1;
 		}
@@ -227,6 +231,7 @@ tldk_module_init(ngx_cycle_t *cycle)
 
 	cf = (tldk_conf_t *)ngx_get_conf(cycle->conf_ctx, ngx_tldk_module);
 
+	/*初始化eal*/
 	rc = rte_eal_init(cf->eal_argc, cf->eal_argv);
 	if (rc < 0) {
 		RTE_LOG(ERR, USER1,
@@ -235,6 +240,7 @@ tldk_module_init(ngx_cycle_t *cycle)
 		return NGX_ERROR;
 	}
 
+	/*更新port配置*/
 	rc = process_conf(cf);
 	if (rc < 0) {
 		RTE_LOG(ERR, USER1,
@@ -244,6 +250,7 @@ tldk_module_init(ngx_cycle_t *cycle)
 	}
 
 	/* port initialization */
+	/*初始化所有port*/
 	rc = be_port_init(cf);
 	if (rc != 0) {
 		RTE_LOG(ERR, USER1,
@@ -256,12 +263,14 @@ tldk_module_init(ngx_cycle_t *cycle)
 	/* initialise TLDK contexts */
 	for (i = 0; i != cf->nb_ctx; i++) {
 		wrk = cf->ctx[i].worker;
-		rc = init_context(wrk2ctx + wrk, cf->ctx + i, cf);
+		/*初始化此worker对应的context*/
+		rc = init_context(wrk2ctx + wrk/*当前work*/, cf->ctx + i, cf);
 		if (rc != 0)
 			break;
 	}
 
 	if (i != cf->nb_ctx) {
+	    /*初始化失败，执行回退*/
 		for (j = 0; j != i; j++) {
 			wrk = cf->ctx[j].worker;
 			fini_context(wrk2ctx + wrk);
@@ -277,6 +286,7 @@ tldk_module_init(ngx_cycle_t *cycle)
 		RTE_LOG(NOTICE, USER1, "%s: starting port %u\n",
 			__func__, cf->port[i].id);
 
+		/*启动网络设备*/
 		rc = rte_eth_dev_start(cf->port[i].id);
 		if (rc != 0) {
 			RTE_LOG(ERR, USER1,
@@ -299,14 +309,17 @@ tldk_module_init(ngx_cycle_t *cycle)
 			goto freectx;
 		}
 
+		/*如果be_in_worker为True,则继续循环*/
 		if (tcx->cf->be_in_worker)
 			continue;
 
+		/*取对应的logic core*/
 		lc = cf->ctx[i].lcore;
 		num = lc_ctxs[lc].nb_ctxs;
 		ctx_lim = RTE_DIM(lc_ctxs[lc].ctxs);
 
 		if (num < ctx_lim) {
+		    /*设置logic core与tcx的对应关系*/
 			lc_ctxs[lc].ctxs[num] = tcx;
 			lc_ctxs[lc].nb_ctxs++;
 		} else {
@@ -324,7 +337,9 @@ tldk_module_init(ngx_cycle_t *cycle)
 	 */
 	for (i = 0; i < RTE_MAX_LCORE; i++) {
 		if (lc_ctxs[i].nb_ctxs != 0) {
+		    /*当前core $i有tcx配置，检查并启动相应的work函数*/
 			if (be_check_lcore(i) != 0 ||
+			        /*执行work函数加载*/
 					rte_eal_remote_launch(be_lcore_main,
 						&lc_ctxs[i], i) != 0) {
 				RTE_LOG(ERR, USER1,
@@ -416,6 +431,7 @@ tldk_process_init(ngx_cycle_t *cycle)
 	return NGX_OK;
 }
 
+/*tldk_main 配置block处理*/
 static char *
 tldk_conf_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -431,6 +447,7 @@ tldk_conf_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 	return rv;
 }
 
+/*tldk_ctx 配置block处理*/
 static char *
 tldk_ctx_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {

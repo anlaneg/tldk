@@ -102,6 +102,7 @@ be_lcore_lpm_init(struct tldk_ctx *tcx, uint32_t sid,
 		.number_tbl8s = MAX_TBL8,
 	};
 
+	/*ipv4路由表*/
 	snprintf(str, sizeof(str), "LPM4%lu-%u\n", worker, lcore);
 	tcx->lpm4 = rte_lpm_create(str, sid, &lpm4_cfg);
 	RTE_LOG(NOTICE, USER1, "%s(worker=%lu, lcore=%u): lpm4=%p;\n",
@@ -109,6 +110,7 @@ be_lcore_lpm_init(struct tldk_ctx *tcx, uint32_t sid,
 	if (tcx->lpm4 == NULL)
 		return -ENOMEM;
 
+	/*ipv6路由表*/
 	snprintf(str, sizeof(str), "LPM6%lu-%u\n", worker, lcore);
 	tcx->lpm6 = rte_lpm6_create(str, sid, &lpm6_cfg);
 	RTE_LOG(NOTICE, USER1, "%s(worker=%lu, lcore=%u): lpm6=%p;\n",
@@ -177,6 +179,7 @@ port_init(const struct tldk_port_conf *pcf)
 	struct rte_eth_conf port_conf;
 	struct rte_eth_dev_info dev_info;
 
+	/*取此port的设备信息*/
 	rte_eth_dev_info_get(pcf->id, &dev_info);
 
 	if ((dev_info.rx_offload_capa & pcf->rx_offload) != pcf->rx_offload) {
@@ -214,6 +217,7 @@ port_init(const struct tldk_port_conf *pcf)
 
 	port_conf.txmode.offloads = pcf->tx_offload;
 
+	/*配置pcf->id号port对应的rx,tx队列数为pcf->nb_queues*/
 	rc = rte_eth_dev_configure(pcf->id, pcf->nb_queues, pcf->nb_queues,
 			&port_conf);
 	RTE_LOG(NOTICE, USER1,
@@ -238,6 +242,7 @@ be_check_lcore(uint32_t lid)
 		return -EINVAL;
 	}
 
+	/*master不是此core时，如果此core已running，则报错*/
 	if (rte_get_master_lcore() != lid &&
 		rte_eal_get_lcore_state(lid) == RUNNING) {
 		RTE_LOG(ERR, USER1, "lcore %u already in use\n", lid);
@@ -247,6 +252,7 @@ be_check_lcore(uint32_t lid)
 	return 0;
 }
 
+/*mbuf pool创建*/
 int
 be_mpool_init(struct tldk_ctx *tcx)
 {
@@ -291,6 +297,7 @@ be_mpool_init(struct tldk_ctx *tcx)
 	return 0;
 }
 
+/*设备的rx,tx队列初始化*/
 int
 be_queue_init(struct tldk_ctx *tcx, const tldk_conf_t *cf)
 {
@@ -315,6 +322,7 @@ be_queue_init(struct tldk_ctx *tcx, const tldk_conf_t *cf)
 
 		socket = rte_eth_dev_socket_id(port_id);
 
+		/*配置设备的rx queue*/
 		rc = rte_eth_rx_queue_setup(port_id, queue_id, nb_rxd,
 				socket, &dev_info.default_rxconf, tcx->mpool);
 		if (rc < 0) {
@@ -324,6 +332,7 @@ be_queue_init(struct tldk_ctx *tcx, const tldk_conf_t *cf)
 			return rc;
 		}
 
+		/*配置设备的tx queue*/
 		rc = rte_eth_tx_queue_setup(port_id, queue_id, nb_txd,
 				socket, &dev_info.default_txconf);
 		if (rc < 0) {
@@ -349,6 +358,7 @@ be_port_init(tldk_conf_t *cf)
 
 	for (i = 0; i != cf->nb_port; i++) {
 		dpf = &cf->port[i];
+		/*初始化dpdk port*/
 		rc = port_init(dpf);
 		if (rc != 0) {
 			RTE_LOG(ERR, USER1,
@@ -357,6 +367,7 @@ be_port_init(tldk_conf_t *cf)
 			return NGX_ERROR;
 		}
 		rte_eth_macaddr_get(dpf->id, &dpf->mac);
+		/*对此接口开启混杂模式*/
 		rte_eth_promiscuous_enable(dpf->id);
 	}
 
@@ -487,8 +498,10 @@ be_add_dest(const struct tldk_dest_conf *dcf, struct tldk_ctx *tcx,
 		fill_dst(dp + i, &tcx->dev[dev_idx], pcf, dcf,
 			l3_type, tcx->frag_mpool);
 		if (family == AF_INET)
+		    /*ipv4路由添加*/
 			rc = be_add_ipv4_route(tcx, dcf, n + i);
 		else
+		    /*ipv6路由添加*/
 			rc = be_add_ipv6_route(tcx, dcf, n + i);
 	}
 
@@ -520,6 +533,7 @@ be_dst_init(struct tldk_ctx *tcx, const tldk_conf_t *cf)
 				 */
 				port_id = tcx->dev[l].cf.port;
 				pcf = &cf->port[port_id];
+				/*路由添加*/
 				rc = be_add_dest(dcf, tcx, l, pcf, f, 1);
 				if (rc != 0) {
 					RTE_LOG(ERR, USER1,
@@ -869,6 +883,7 @@ type0_tcp_rx_callback(__rte_unused dpdk_port_t port,
 
 	l2_len = sizeof(*eth);
 
+	/*遍历所有packets*/
 	for (j = 0; j != nb_pkts; j++) {
 
 		BE_PKT_DUMP(pkt[j]);
@@ -1024,6 +1039,7 @@ setup_rx_cb(const struct tldk_dev *td, struct tldk_ctx *tcx)
 
 	for (i = 0; i != n; i++) {
 		if ((smask & ptype2cb[i].mask) == ptype2cb[i].mask) {
+		    /*添加td->cf.port端口对应的rx回调*/
 			cb = rte_eth_add_rx_callback(td->cf.port, td->cf.queue,
 				ptype2cb[i].fn, tcx);
 			rc = -rte_errno;

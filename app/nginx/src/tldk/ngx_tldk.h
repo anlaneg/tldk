@@ -50,41 +50,42 @@
 #define MAX_CTX_PER_LOCRE 32
 
 struct tldk_port_conf {
-	uint32_t id;
-	uint32_t nb_queues;
-	uint32_t queue_map;
-	uint32_t mtu;
+	uint32_t id;/*接口id*/
+	uint32_t nb_queues;/*接口的最大数目*/
+	uint32_t queue_map;/*有哪些queue被打了掩码*/
+	uint32_t mtu;/*接口mtu*/
 	uint64_t rx_offload;
 	uint64_t tx_offload;
-	uint32_t ipv4;
-	struct in6_addr ipv6;
-	struct rte_ether_addr mac;
+	uint32_t ipv4;/*接口ipv4地址*/
+	struct in6_addr ipv6;/*接口ipv6地址*/
+	struct rte_ether_addr mac;/*自dpdk驱动拿到的此设备的mac地址*/
 };
 
 struct tldk_dev_conf {
-	uint32_t id;
-	uint32_t port;
+	uint32_t id;/*设备id*/
+	uint32_t port;/*port id编号，于tld_port_conf的顺序一致*/
 	uint32_t queue;
 };
 
+/*路由情况*/
 struct tldk_dest_conf {
-	uint32_t dev;
-	uint32_t mtu;
-	uint32_t prfx;
-	uint16_t family;
+	uint32_t dev;/*出接口*/
+	uint32_t mtu;/*mtu*/
+	uint32_t prfx;/*mask情况*/
+	uint16_t family;/*ipv4/ipv6生效*/
 	union {
-		struct in_addr ipv4;
+		struct in_addr ipv4;/*目的地址*/
 		struct in6_addr ipv6;
 	};
-	struct rte_ether_addr mac;
+	struct rte_ether_addr mac;/*目的mac*/
 };
 
 #define	TLDK_MAX_DEST	0x10
 
 struct tldk_ctx_conf {
-	ngx_uint_t worker;
-	uint32_t lcore;
-	uint32_t nb_mbuf;
+	ngx_uint_t worker;/*worker的id(自0开始编号）*/
+	uint32_t lcore;/*worker占用的core*/
+	uint32_t nb_mbuf;/*mbuf的数目*/
 	uint32_t nb_stream;
 	struct {
 		uint32_t nb_min;
@@ -92,8 +93,8 @@ struct tldk_ctx_conf {
 	} free_streams;
 	uint32_t nb_rbuf;
 	uint32_t nb_sbuf;
-	uint32_t nb_dev;
-	uint32_t nb_dest;
+	uint32_t nb_dev;/*指出dev数组的已使用长度*/
+	uint32_t nb_dest;/*指出dest数组的已使用长度*/
 	uint32_t be_in_worker;
 	uint32_t tcp_timewait; /* TCP TIME_WAIT value in milliseconds */
 	struct tldk_dev_conf dev[RTE_MAX_ETHPORTS];
@@ -103,13 +104,13 @@ struct tldk_ctx_conf {
 typedef struct tldk_conf tldk_conf_t;
 
 struct tldk_conf {
-	uint32_t eal_argc;
-	char *eal_argv[NGX_CONF_MAX_ARGS];
-	char eal_cmd[PATH_MAX];
-	uint32_t nb_port;
-	struct tldk_port_conf port[RTE_MAX_ETHPORTS];
-	uint32_t nb_ctx;
-	struct tldk_ctx_conf ctx[RTE_MAX_LCORE];
+	uint32_t eal_argc;/*传递给dpdk的参数数目*/
+	char *eal_argv[NGX_CONF_MAX_ARGS];/*传递给dpdk的参数指针列表，指向eal_cmd中相应位置*/
+	char eal_cmd[PATH_MAX];/*传递给dpdk的参数列表*/
+	uint32_t nb_port;/*指出port数组占用的长度*/
+	struct tldk_port_conf port[RTE_MAX_ETHPORTS];/*指明各port配置*/
+	uint32_t nb_ctx;/*指出ctx数组占用的长度*/
+	struct tldk_ctx_conf ctx[RTE_MAX_LCORE];/*tldk_ctx配置存于此处*/
 };
 
 extern char *tldk_block_parse(ngx_conf_t *, ngx_command_t *, void *);
@@ -140,11 +141,11 @@ struct tldk_dev {
 
 struct tldk_ctx {
 	const struct tldk_ctx_conf *cf;
-	struct rte_lpm *lpm4;
-	struct rte_lpm6 *lpm6;
+	struct rte_lpm *lpm4;/*v4路由表*/
+	struct rte_lpm6 *lpm6;/*v6路由表*/
 	struct tle_ctx *ctx;
-	struct rte_mempool *mpool;
-	struct rte_mempool *frag_mpool;
+	struct rte_mempool *mpool;/*指向创建的mbuf pool*/
+	struct rte_mempool *frag_mpool;/*指向创建的分片mbuf pool*/
 	uint32_t nb_dev;
 	struct tldk_dev dev[RTE_MAX_ETHPORTS];
 	uint32_t dst4_num;
@@ -159,7 +160,7 @@ struct tldk_ctx {
 extern struct tldk_ctx wrk2ctx[RTE_MAX_LCORE];
 
 struct lcore_ctxs_list {
-	uint32_t nb_ctxs;
+	uint32_t nb_ctxs;/*ctxs数组的长度*/
 	struct tldk_ctx *ctxs[MAX_CTX_PER_LOCRE];
 };
 

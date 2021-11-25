@@ -133,6 +133,7 @@ tldk_port_parse(ngx_conf_t *cf, struct tldk_port_conf *prt)
 	uint32_t i, j;
 	ngx_str_t *v;
 
+	/*各参数对应的处理函数*/
 	static const struct key_handler kh[] = {
 		{
 			.name = "port",
@@ -162,6 +163,7 @@ tldk_port_parse(ngx_conf_t *cf, struct tldk_port_conf *prt)
 
 	union parse_val pvl[RTE_DIM(kh)];
 
+	/*为mtu提供默认值*/
 	memset(pvl, 0, sizeof(pvl));
 	pvl[1].u64 = RTE_ETHER_MAX_LEN - RTE_ETHER_CRC_LEN;
 
@@ -254,6 +256,7 @@ tldk_dev_parse(ngx_conf_t *cf, struct tldk_dev_conf *dev,
 	return NGX_CONF_OK;
 }
 
+/*路由情况配置*/
 static char *
 tldk_dest_parse(ngx_conf_t *cf, struct tldk_dest_conf *dst)
 {
@@ -326,6 +329,7 @@ tldk_dest_parse(ngx_conf_t *cf, struct tldk_dest_conf *dst)
 	return NGX_CONF_OK;
 }
 
+/*tldk_main 配置block配置项解析*/
 char *
 tldk_block_parse(ngx_conf_t *cf, ngx_command_t *dummy, void *conf)
 {
@@ -338,6 +342,7 @@ tldk_block_parse(ngx_conf_t *cf, ngx_command_t *dummy, void *conf)
 	tcf = (tldk_conf_t *)((void **)conf)[0];
 	v = cf->args->elts;
 
+	/*dpdk相关参数获取"eal_cmd"*/
 	if (ngx_strcmp(v[0].data, "eal_cmd") == 0) {
 
 		if (cf->args->nelts == 1 ||
@@ -360,6 +365,7 @@ tldk_block_parse(ngx_conf_t *cf, ngx_command_t *dummy, void *conf)
 
 	} else if (ngx_strcmp(v[0].data, "port") == 0) {
 
+	    /*解析port配置，port <id>,mtu,flag,ipv4,ipv6地址*/
 		rv = tldk_port_parse(cf, &prt);
 		if (rv == NGX_CONF_OK) {
 
@@ -448,6 +454,7 @@ tldk_ctx_parse(ngx_conf_t *cf, ngx_command_t *dummy, void *conf)
 			return NGX_CONF_ERROR;
 		tcx->tcp_timewait = pvl.u64;
 	} else if (ngx_strcmp(v[0].data, "dev") == 0) {
+	    /*dev相关配置解析*/
 		if (tcx->nb_dev >= RTE_DIM(tcx->dev))
 			return NGX_CONF_ERROR;
 		rv = tldk_dev_parse(cf, tcx->dev + tcx->nb_dev, tcf);
@@ -456,6 +463,7 @@ tldk_ctx_parse(ngx_conf_t *cf, ngx_command_t *dummy, void *conf)
 		tcx->nb_dev++;
 			return rv;
 	} else if (ngx_strcmp(v[0].data, "dest") == 0) {
+	    /*dest相关配置解析*/
 		if (tcx->nb_dest >= RTE_DIM(tcx->dest))
 			return NGX_CONF_ERROR;
 		rv = tldk_dest_parse(cf, tcx->dest + tcx->nb_dest);
