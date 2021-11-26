@@ -55,9 +55,12 @@ struct tle_ctx {
 	struct tle_ctx_param prm;
 	uint32_t cycles_ms_shift;  /* to convert from cycles to ms */
 	struct {
-		rte_spinlock_t lock;//锁，保护streams结构体
-		uint32_t nb_free; /* number of free streams. */ //空闲stream的数目
-		STAILQ_HEAD(, tle_stream) free;//tle_stream的空闲链表
+	    //锁，保护streams结构体
+		rte_spinlock_t lock;
+		 //空闲stream的数目
+		uint32_t nb_free; /* number of free streams. */
+		//tle_stream的空闲链表
+		STAILQ_HEAD(, tle_stream) free;
 		void *buf; /* space allocated for streams */
 	} streams;
 

@@ -62,19 +62,23 @@ get_streams(struct tle_ctx *ctx, struct tle_stream *s[], uint32_t num)
 
 	rte_spinlock_lock(&ctx->streams.lock);
 
+	/*使用能满足的最小数目stream,并收集到s中*/
 	n = RTE_MIN(ctx->streams.nb_free, num);
 	for (i = 0, p = STAILQ_FIRST(&ctx->streams.free);
-			i != n;//有多个空闲的nb_free
+			i != n;
 			i++, p = STAILQ_NEXT(p, link))
-		s[i] = p;//收集足够数量的stream
+		s[i] = p;
 
+	//无空闲stream
 	if (p == NULL)
 		/* we retrieved all free entries */
-		STAILQ_INIT(&ctx->streams.free);//无空闲stream
+		STAILQ_INIT(&ctx->streams.free);
 	else
-		STAILQ_FIRST(&ctx->streams.free) = p;//更新空闲stream
+	    //更新free，使其指向下一个空闲的stream
+		STAILQ_FIRST(&ctx->streams.free) = p;
 
-	ctx->streams.nb_free -= n;//数量减少
+	//数量减少
+	ctx->streams.nb_free -= n;
 	rte_spinlock_unlock(&ctx->streams.lock);
 	return n;
 }

@@ -26,6 +26,7 @@ extern "C" {
  * TCP stream creation parameters.
  */
 struct tle_tcp_stream_addr {
+    /*本端地址*/
 	struct sockaddr_storage local;  /**< stream local address. */
 	struct sockaddr_storage remote; /**< stream remote address. */
 };
@@ -36,6 +37,7 @@ struct tle_tcp_stream_cfg {
 	uint8_t nb_retries;     /**< max number of retransmission attempts. */
 
 	/* _cb and _ev are mutually exclusive */
+	/*当前事件与cb是互斥的*/
 	struct tle_event *err_ev;      /**< error event to use.  */
 	struct tle_stream_cb err_cb;   /**< error callback to use. */
 
@@ -47,7 +49,7 @@ struct tle_tcp_stream_cfg {
 };
 
 struct tle_tcp_stream_param {
-	struct tle_tcp_stream_addr addr;
+	struct tle_tcp_stream_addr addr;/*本端及对端地址*/
 	struct tle_tcp_stream_cfg cfg;
 };
 

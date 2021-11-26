@@ -55,13 +55,15 @@ static int (*real_setsockopt)(int, int, int, const void *, socklen_t);
 static int (*real_shutdown)(int, int);
 static ssize_t (*real_writev)(int, const struct iovec *, int);
 
+/*自list中获取num个tldk_sock存入到rs中*/
 static inline uint32_t
 get_socks(struct tldk_sock_list *list, struct tldk_sock *rs[],
-	uint32_t num)
+	uint32_t num/*socket数目*/)
 {
 	struct tldk_sock *s;
 	uint32_t i, n;
 
+	/*申请数量不得超过实际数量，先获得num个socket*/
 	n = RTE_MIN(list->num, num);
 	for (i = 0, s = LIST_FIRST(&list->head);
 			i != n;
@@ -71,14 +73,18 @@ get_socks(struct tldk_sock_list *list, struct tldk_sock *rs[],
 
 	/* we retrieved all free entries */
 	if (s == NULL)
+	    /*队列被拿空了*/
 		LIST_INIT(&list->head);
 	else
+	    /*使head指向下一个可用*/
 		LIST_FIRST(&list->head) = s;
 
+	/*总数减少n*/
 	list->num -= n;
 	return n;
 }
 
+/*分配一个socket*/
 static inline struct tldk_sock *
 get_sock(struct tldk_sock_list *list)
 {
@@ -198,6 +204,7 @@ tldk_stbl_init(const ngx_cycle_t *cycle, const struct tldk_ctx *tc)
 	struct rlimit rlim;
 
 	lc = tc->cf->lcore;
+	/*支持多少条流*/
 	sn = tc->cf->nb_stream;
 	sid = rte_lcore_to_socket_id(lc);
 
@@ -226,12 +233,14 @@ tldk_stbl_init(const ngx_cycle_t *cycle, const struct tldk_ctx *tc)
 		stbl.syneq, stbl.ereq, stbl.rxeq, stbl.txeq);
 	if (stbl.syneq == NULL || stbl.ereq == NULL || stbl.rxeq == NULL ||
 			stbl.txeq == NULL)
+	    /*有一种初始化失败，则报错*/
 		return -ENOMEM;
 
 	LIST_INIT(&stbl.lstn.head);
 	LIST_INIT(&stbl.free.head);
 	LIST_INIT(&stbl.use.head);
 
+	/*申请sn个socket*/
 	sz = sn * sizeof(*stbl.sd);
 	stbl.sd = rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE,
 		rte_lcore_to_socket_id(lc));
@@ -272,6 +281,7 @@ tldk_open_bind_listen(struct tldk_ctx *tcx, int domain, int type,
 	struct tldk_sock *ts;
 	struct tle_tcp_stream_param sprm;
 
+	/*分配socket*/
 	ts = get_sock(&stbl.lstn);
 	if (ts == NULL) {
 		errno = ENOBUFS;

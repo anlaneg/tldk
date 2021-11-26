@@ -372,6 +372,7 @@ tldk_open_listening(ngx_cycle_t *cycle, struct tldk_ctx *tcx)
 		if (ls[i].ignore != 0 || ls[i].listen == 0)
 			continue;
 
+		/*关闭fd*/
 		ngx_close_socket(ls[i].fd);
 		ls[i].fd = -1;
 
@@ -379,6 +380,7 @@ tldk_open_listening(ngx_cycle_t *cycle, struct tldk_ctx *tcx)
 			host, sizeof(host), srv, sizeof(srv),
 			NI_NUMERICHOST | NI_NUMERICSERV);
 
+		/*监听socket*/
 		ls[i].fd = tldk_open_bind_listen(tcx,
 			ls[i].sockaddr->sa_family, ls[i].type,
 			ls[i].sockaddr, ls[i].socklen,

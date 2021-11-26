@@ -54,8 +54,11 @@ tldk_dump_event_stats(void);
 struct tldk_sock {
 	LIST_ENTRY(tldk_sock) link;
 	struct tle_stream *s;
+	/*异常事件*/
 	struct tle_event *erev;
+	/*接收事件*/
 	struct tle_event *rxev;
+	/*发送事件*/
 	struct tle_event *txev;
 	ngx_event_t *rev;
 	ngx_event_t *wev;
@@ -80,7 +83,9 @@ struct tldk_stbl {
         struct tldk_sock_list lstn;
         struct tldk_sock_list use;
         int32_t nosd;
+        /*socket数目*/
         uint32_t snum;
+        /*socket池*/
         struct tldk_sock *sd;
 };
 

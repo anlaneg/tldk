@@ -20,6 +20,7 @@
 
 #include "osdep.h"
 
+/*申请并初始化tle_evq*/
 struct tle_evq *
 tle_evq_create(const struct tle_evq_param *prm)
 {
@@ -32,7 +33,9 @@ tle_evq_create(const struct tle_evq_param *prm)
 		return NULL;
 	}
 
+	/*获取结构体大小*/
 	sz = sizeof(*evq) + sizeof(evq->events[0]) * prm->max_events;
+	/*申请evq*/
 	evq =  rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE,
 		prm->socket_id);
 	if (evq == NULL) {

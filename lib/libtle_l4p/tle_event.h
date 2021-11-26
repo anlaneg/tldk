@@ -47,8 +47,10 @@ struct tle_event {
 
 struct tle_evq {
 	rte_spinlock_t lock;
+	/*可用event总数*/
 	uint32_t nb_events;
 	uint32_t nb_armed;
+	/*空闲event总数*/
 	uint32_t nb_free;
 	TAILQ_HEAD(, tle_event) armed;
 	TAILQ_HEAD(, tle_event) free;
@@ -60,6 +62,7 @@ struct tle_evq {
  */
 struct tle_evq_param {
 	int32_t socket_id;    /**< socket ID to allocate memory from. */
+	/*支持的event最大数*/
 	uint32_t max_events;  /**< max number of events in queue. */
 };
 
@@ -180,6 +183,7 @@ tle_event_active(struct tle_event *ev, enum tle_ev_state st)
 	q = ev->head;
 	rte_compiler_barrier();
 
+	/*为tle_event设置state*/
 	rte_spinlock_lock(&q->lock);
 	if (st > ev->state) {
 		if (st == TLE_SEV_UP) {

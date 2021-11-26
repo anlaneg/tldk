@@ -344,12 +344,14 @@ check_stream_prm(const struct tle_ctx *ctx,
 	if ((prm->addr.local.ss_family != AF_INET &&
 			prm->addr.local.ss_family != AF_INET6) ||
 			prm->addr.local.ss_family != prm->addr.remote.ss_family)
+	    /*当前仅支持ipv4/ipv6协议*/
 		return -EINVAL;
 
 	/* callback and event notifications mechanisms are mutually exclusive */
 	if (check_cbev(prm->cfg.recv_ev, &prm->cfg.recv_cb) != 0 ||
 			check_cbev(prm->cfg.recv_ev, &prm->cfg.recv_cb) != 0 ||
 			check_cbev(prm->cfg.err_ev, &prm->cfg.err_cb) != 0)
+	    /*事件机制与回调不能同时设置*/
 		return -EINVAL;
 
 	/* check does context support desired address family. */
@@ -370,6 +372,7 @@ tle_tcp_stream_open(struct tle_ctx *ctx,
 	struct tle_tcp_stream *s;
 	int32_t rc;
 
+	/*参数合法性检查*/
 	if (ctx == NULL || prm == NULL || check_stream_prm(ctx, prm) != 0) {
 		rte_errno = EINVAL;
 		return NULL;
