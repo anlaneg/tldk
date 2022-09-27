@@ -31,12 +31,16 @@
 #include <rte_errno.h>
 
 struct tldk_sock_stat {
+    /*调用accept的数目*/
 	uint64_t nb_accept;
+	/*调用close的数目*/
 	uint64_t nb_close;
 	uint64_t nb_readv;
 	uint64_t nb_recv;
 	uint64_t nb_setopts;
+	/*调用shutdown的数目*/
 	uint64_t nb_shutdown;
+	/*调用writev的数目*/
 	uint64_t nb_writev;
 };
 
@@ -273,6 +277,7 @@ tldk_stbl_init(const ngx_cycle_t *cycle, const struct tldk_ctx *tc)
 	return 0;
 }
 
+/*实现tldk_sock监听*/
 int
 tldk_open_bind_listen(struct tldk_ctx *tcx, int domain, int type,
 	const struct sockaddr *addr, socklen_t addrlen, int backlog)
@@ -281,7 +286,7 @@ tldk_open_bind_listen(struct tldk_ctx *tcx, int domain, int type,
 	struct tldk_sock *ts;
 	struct tle_tcp_stream_param sprm;
 
-	/*分配socket*/
+	/*分配一个socket*/
 	ts = get_sock(&stbl.lstn);
 	if (ts == NULL) {
 		errno = ENOBUFS;
@@ -296,6 +301,7 @@ tldk_open_bind_listen(struct tldk_ctx *tcx, int domain, int type,
 
 	memset(&sprm, 0, sizeof(sprm));
 
+	/*设置err,recv,send event*/
 	sprm.cfg.err_ev = ts->erev;
 	sprm.cfg.recv_ev = ts->rxev;
 	sprm.cfg.send_ev = ts->txev;
@@ -303,6 +309,7 @@ tldk_open_bind_listen(struct tldk_ctx *tcx, int domain, int type,
 	memcpy(&sprm.addr.local, addr, addrlen);
 	sprm.addr.remote.ss_family = sprm.addr.local.ss_family;
 
+	/*构造tle_stream*/
 	ts->s = tle_tcp_stream_open(tcx->ctx, &sprm);
 	if (ts->s != NULL)
 		rc = tle_tcp_stream_listen(ts->s);
@@ -332,12 +339,15 @@ close(int sd)
 	FE_TRACE("worker#%lu: %s(%d);\n",
 		ngx_worker, __func__, sd);
 
+	/*由sd获得tldk_sock*/
 	ts = sd_to_sock(sd);
 	if (ts == NULL)
+	    /*走kernel默认调用*/
 		return real_close(sd);
 
 	sock_stat.nb_close++;
 
+	/*关闭tldk_sock*/
 	rc = close_sock(ts);
 	if (rc != 0) {
 		errno =-rc;
@@ -358,8 +368,10 @@ shutdown(int sd, int how)
 	if (ts == NULL)
 		return real_shutdown(sd, how);
 
+	/*统计*/
 	sock_stat.nb_shutdown++;
 
+	/*指明不支持shutdown*/
 	errno = ENOTSUP;
 	return -1;
 }
@@ -519,6 +531,7 @@ writev(int sd, const struct iovec *iov, int iovcnt)
 	FE_TRACE("worker#%lu: %s(%d, %p, %d);\n",
 		ngx_worker, __func__, sd, iov, iovcnt);
 
+	/*取此进程对应的tcx*/
 	tcx =  wrk2ctx + ngx_worker;
 	ts = sd_to_sock(sd);
 	if (ts == NULL)
@@ -555,5 +568,6 @@ setsockopt(int sd, int level, int optname, const void *optval, socklen_t optlen)
 		return -1;
 	}
 
+	/*setsockopt当前采用空实现*/
 	return 0;
 }

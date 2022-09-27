@@ -62,8 +62,11 @@ RTE_DEFINE_PER_LCORE(struct netfe_lcore *, _fe);
 static volatile int force_quit;
 
 static struct netbe_cfg becfg = {.mpool_buf_num=MPOOL_NB_BUF};
+/*按numa id+1 索引的mbuf pool*/
 static struct rte_mempool *mpool[RTE_MAX_NUMA_NODES + 1];
+/*按numa id +1 索引的分片pool*/
 static struct rte_mempool *frag_mpool[RTE_MAX_NUMA_NODES + 1];
+/*协议名称*/
 static char proto_name[3][10] = {"udp", "tcp", ""};
 
 static const struct rte_eth_conf port_conf_default;
@@ -88,6 +91,7 @@ static LCORE_MAIN_FUNCTYPE lcore_main;
 #include "tcp.h"
 #include "udp.h"
 
+/*日志输出的详尽程度*/
 int verbose = VERBOSE_NONE;
 
 static void
@@ -124,7 +128,7 @@ netbe_dest_init(const char *fname, struct netbe_cfg *cfg)
 	struct netbe_lcore *lc;
 	struct netbe_dest_prm prm;
 
-	//解析接口配置文件
+	//解析be配置文件
 	rc = netbe_parse_dest(fname, &prm);
 	if (rc != 0)
 		return rc;
@@ -169,9 +173,9 @@ netbe_dest_init(const char *fname, struct netbe_cfg *cfg)
 static void
 func_ptrs_init(uint32_t proto) {
 	if (proto == TLE_PROTO_TCP) {
-		//注册收发回调
-		tle_rx_bulk = tle_tcp_rx_bulk;
-		tle_tx_bulk = tle_tcp_tx_bulk;
+		//注册tcp收发回调
+		tle_rx_bulk = tle_tcp_rx_bulk;/*tcp批量收包*/
+		tle_tx_bulk = tle_tcp_tx_bulk;/*tcp批量发包*/
 		tle_stream_recv = tle_tcp_stream_recv;
 		tle_stream_close = tle_tcp_stream_close;
 
@@ -221,15 +225,16 @@ main(int argc, char *argv[])
 
 	//解析l4fwd命令行
 	rc = parse_app_options(argc, argv, &becfg, &ctx_prm,
-		fecfg_fname, becfg_fname);
+		fecfg_fname/*fe配置文件名*/, becfg_fname/*be配置文件名*/);
 	if (rc != 0)
 		rte_exit(EXIT_FAILURE,
 			"%s: parse_app_options failed with error code: %d\n",
 			__func__, rc);
 
 	/* init all the function pointer */
-	func_ptrs_init(becfg.proto);
+	func_ptrs_init(becfg.proto);/*lcore_main回调设置*/
 
+	/*dpdk port初始化，becfg相关port配置初始化*/
 	rc = netbe_port_init(&becfg);
 	if (rc != 0)
 		rte_exit(EXIT_FAILURE,
@@ -244,6 +249,7 @@ main(int argc, char *argv[])
 	if (rc != 0)
 		sig_handle(SIGQUIT);
 
+	/*遍历所有port*/
 	for (i = 0; i != becfg.prt_num && rc == 0; i++) {
 		RTE_LOG(NOTICE, USER1, "%s: starting port %u\n",
 			__func__, becfg.prt[i].id);
@@ -258,6 +264,8 @@ main(int argc, char *argv[])
 		}
 		//获取接口信息
 		rte_eth_dev_info_get(becfg.prt[i].id, &dev_info);
+
+		/*更新接口rss reta*/
 		rc = update_rss_reta(&becfg.prt[i], &dev_info);
 		if (rc != 0)
 			sig_handle(SIGQUIT);
@@ -265,6 +273,7 @@ main(int argc, char *argv[])
 
 	feprm.max_streams = ctx_prm.max_streams * becfg.cpu_num;
 
+	/*fe配置文件解析stream配置*/
 	rc = (rc != 0) ? rc : netfe_parse_cfg(fecfg_fname, &feprm);
 	if (rc != 0)
 		sig_handle(SIGQUIT);
@@ -290,6 +299,7 @@ main(int argc, char *argv[])
 
 	rte_eal_mp_wait_lcore();
 
+	/*显示be统计信息*/
 	for (i = 0; i != becfg.prt_num; i++) {
 		RTE_LOG(NOTICE, USER1, "%s: stoping port %u\n",
 			__func__, becfg.prt[i].id);

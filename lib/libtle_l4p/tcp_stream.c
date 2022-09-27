@@ -62,7 +62,7 @@ tcp_fini_streams(struct tle_ctx *ctx)
 }
 
 static struct rte_ring *
-alloc_ring(uint32_t n, uint32_t flags, int32_t socket)
+alloc_ring(uint32_t n/*ring的大小*/, uint32_t flags, int32_t socket)
 {
 	struct rte_ring *r;
 	size_t sz;
@@ -71,6 +71,7 @@ alloc_ring(uint32_t n, uint32_t flags, int32_t socket)
 	n = rte_align32pow2(n);
 	sz =  rte_ring_get_memsize(n);
 
+	/*为ring申请内存*/
 	r = rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE, socket);
 	if (r == NULL) {
 		TCP_LOG(ERR, "%s: allocation of %zu bytes on socket %d "
@@ -79,6 +80,7 @@ alloc_ring(uint32_t n, uint32_t flags, int32_t socket)
 		return NULL;
 	}
 
+	/*设置ring名称*/
 	snprintf(name, sizeof(name), "%p@%zu", r, sz);
 	rte_ring_init(r, name, n, flags);
 	return r;
@@ -178,16 +180,18 @@ tcp_free_drbs(struct tle_stream *s, struct tle_drb *drb[], uint32_t nb_drb)
 	_rte_ring_enqueue_burst(us->tx.drb.r, (void **)drb, nb_drb);
 }
 
+/*创建轮子定时器*/
 static struct tle_timer_wheel *
 alloc_timers(const struct tle_ctx *ctx)
 {
 	struct tle_timer_wheel *twl;
 	struct tle_timer_wheel_args twprm;
 
-	twprm.tick_size = TCP_RTO_GRANULARITY;
-	twprm.max_timer = ctx->prm.max_streams;
+	twprm.tick_size = TCP_RTO_GRANULARITY;/*定义tick的大小*/
+	twprm.max_timer = ctx->prm.max_streams;/*为每stream对应一个定时器*/
 	twprm.socket_id = ctx->prm.socket_id;
 
+	/*创建轮子定时器*/
 	twl = tle_timer_create(&twprm, tcp_get_tms(ctx->cycles_ms_shift));
 	if (twl == NULL)
 		TCP_LOG(ERR, "alloc_timers(ctx=%p) failed with error=%d\n",
@@ -278,6 +282,7 @@ tcp_init_streams(struct tle_ctx *ctx)
 	TCP_LOG(NOTICE, "ctx:%p, caluclated stream size: %u\n",
 		ctx, szofs.size);
 
+	/*申请tcp streams*/
 	ts = rte_zmalloc_socket(NULL, sizeof(*ts), RTE_CACHE_LINE_SIZE,
 		ctx->prm.socket_id);
 	if (ts == NULL)
@@ -291,9 +296,11 @@ tcp_init_streams(struct tle_ctx *ctx)
 	ctx->streams.buf = ts;
 	STAILQ_INIT(&ctx->streams.free);
 
+	/*初始化stream table*/
 	rc = stbl_init(&ts->st, ctx->prm.max_streams, ctx->prm.socket_id);
 
 	if (rc == 0) {
+	    /*申请一个ring结构，可容纳max_streams*/
 		ts->tsq = alloc_ring(ctx->prm.max_streams, f | RING_F_SC_DEQ,
 			ctx->prm.socket_id);
 		ts->tmr = alloc_timers(ctx);
@@ -317,7 +324,7 @@ static void __attribute__((constructor))
 tcp_stream_setup(void)
 {
 	static const struct stream_ops tcp_ops = {
-		.init_streams = tcp_init_streams,
+		.init_streams = tcp_init_streams,/*tcp context初始化*/
 		.fini_streams = tcp_fini_streams,
 		.free_drbs = tcp_free_drbs,
 	};
@@ -570,24 +577,29 @@ tle_tcp_stream_get_addr(const struct tle_stream *ts,
 	return 0;
 }
 
+/*设置状态为listen状态*/
 int
 tle_tcp_stream_listen(struct tle_stream *ts)
 {
 	struct tle_tcp_stream *s;
 	int32_t rc;
 
+	/*将结构体转化为tle_tcp_stream*/
 	s = TCP_STREAM(ts);
 	if (ts == NULL || s->s.type >= TLE_VNUM)
+	    /*参数类型有误，退出*/
 		return -EINVAL;
 
 	/* app may listen for multiple times to change backlog,
 	 * we will just return success for such cases.
 	 */
 	if (s->tcb.state == TCP_ST_LISTEN)
+	    /*当前状态已为listen,退出*/
 		return 0;
 
 	/* mark stream as not closable. */
 	if (tcp_stream_try_acquire(s) > 0) {
+	    /*更新状态，由close变更为listen*/
 		rc = rte_atomic16_cmpset(&s->tcb.state, TCP_ST_CLOSED,
 				TCP_ST_LISTEN);
 		if (rc != 0) {

@@ -136,9 +136,11 @@ rx_data_enqueue(struct tle_tcp_stream *s, uint32_t seq, uint32_t len,
 	if (r != n) {
 		/* raise RX event */
 		if (s->rx.ev != NULL)
+		    /*有event,触发rx事件*/
 			tle_event_raise(s->rx.ev);
 		/* if RX queue was empty invoke RX notification callback. */
 		else if (s->rx.cb.func != NULL && r == 0)
+		    /*有回调，触发回调函数*/
 			s->rx.cb.func(s->rx.cb.data, &s->s);
 	}
 

@@ -67,15 +67,16 @@ extern int verbose;
  */
 
 struct netbe_port {
-	uint32_t id;
-	uint32_t nb_lcore;
-	uint32_t *lcore_id;
+	uint32_t id;/*port编号*/
+	uint32_t nb_lcore;/*lcore_id数组成员数（有多少cpu负责此port,也即此port有多少队列)*/
+	uint32_t *lcore_id;/*记录负责处理此port的cpus*/
 	uint32_t mtu;
-	uint64_t rx_offload;
-	uint64_t tx_offload;
-	uint32_t ipv4;
-	struct in6_addr ipv6;
-	struct rte_ether_addr mac;
+	uint64_t rx_offload;/*rx方向的offload标记*/
+	uint64_t tx_offload;/*tx方向的offload标记*/
+	uint32_t ipv4;/*port的ipv4地址*/
+	struct in6_addr ipv6;/*port的ipv6地址*/
+	struct rte_ether_addr mac;/*接口Mac*/
+	/*接口rss hash*/
 	uint32_t hash_key_size;
 	uint8_t hash_key[RSS_HASH_KEY_LENGTH];
 };
@@ -103,19 +104,19 @@ struct pkt_buf {
 };
 
 struct netbe_dev {
-	uint16_t rxqid;
-	uint16_t txqid;
-	struct netbe_port port;
+	uint16_t rxqid;/*rx队列号*/
+	uint16_t txqid;/*tx队列号*/
+	struct netbe_port port;/*netbe_dev对应的端口*/
 	struct tle_dev *dev;
 	struct {
-		uint64_t in;
+		uint64_t in;/*统计收方向报文计数*/
 		uint64_t up;
 		uint64_t drop;
 	} rx_stat;
 	struct {
 		uint64_t down;
-		uint64_t out;
-		uint64_t drop;
+		uint64_t out;/*发送的报文*/
+		uint64_t drop;/*丢弃的报文*/
 	} tx_stat;
 	struct pkt_buf tx_buf;
 	struct pkt_buf arp_buf;
@@ -125,15 +126,19 @@ struct netbe_dev {
 #define	LCORE_MAX_DST	(UINT8_MAX + 1)
 
 struct netbe_lcore {
-	uint32_t id;
+	uint32_t id;/*cpu编号*/
+	/*负责udp/tcp*/
 	uint32_t proto; /**< L4 proto to handle. */
 	struct rte_lpm *lpm4;//ipv4路由表
 	struct rte_lpm6 *lpm6;//ipv6路由表
-	struct rte_ip_frag_tbl *ftbl;
+	struct rte_ip_frag_tbl *ftbl;/*分片表*/
+	/*context,封装不同的协议context,见tle_ctx_create*/
 	struct tle_ctx *ctx;
+	/*port队列总数（rx=tx)*/
 	uint32_t prtq_num;
 	uint32_t dst4_num;
 	uint32_t dst6_num;
+	/*当前cpu负责的port,每个port队列对应一个netbe_dev对象，其大小由prtq_num指定*/
 	struct netbe_dev *prtq;
 	struct tle_dest dst4[LCORE_MAX_DST];
 	struct tle_dest dst6[LCORE_MAX_DST];
@@ -145,14 +150,14 @@ struct netbe_lcore {
 
 struct netbe_cfg {
 	uint32_t promisc;//混杂模式
-	uint32_t proto;
-	uint32_t server;
-	uint32_t arp;
-	uint32_t prt_num;
-	uint32_t cpu_num;
-	uint32_t mpool_buf_num;
-	struct netbe_port *prt;
-	struct netbe_lcore *cpu;
+	uint32_t proto;/*指明使能tcp/udp*/
+	uint32_t server;/*指明当前是否为服务端*/
+	uint32_t arp;/*是否开启arp response*/
+	uint32_t prt_num;/*配置指定要使用的port数量*/
+	uint32_t cpu_num;/*be占用的cpu数目*/
+	uint32_t mpool_buf_num;/*每个pool中mbuf数目*/
+	struct netbe_port *prt;/*各port配置*/
+	struct netbe_lcore *cpu;/*be各cpu情况（数组长度由cpu_num指定）*/
 };
 
 /*
@@ -169,14 +174,19 @@ enum {
 
 struct netfe_sprm {
 	uint32_t bidx;  /* BE index to use. */
+	/*本端地址*/
 	struct sockaddr_storage local_addr;  /**< stream local address. */
+	/*远端地址*/
 	struct sockaddr_storage remote_addr; /**< stream remote address. */
 };
 
 struct netfe_stream_prm {
-	uint32_t lcore;
+	uint32_t lcore;/*此stream对应的core*/
 	uint32_t belcore;
 	uint16_t line;
+	/*此stream对应的操作，例如echo,收到的所有都返回
+	 * tx仅向对端发送数据
+	 * */
 	uint16_t op;
 	uint32_t txlen; /* valid/used only for TXONLY op. */
 	uint32_t rxlen; /* Used by RXTX */
@@ -185,9 +195,9 @@ struct netfe_stream_prm {
 };
 
 struct netfe_lcore_prm {
-	uint32_t max_streams;
-	uint32_t nb_streams;
-	struct netfe_stream_prm *stream;
+	uint32_t max_streams;/*此core上stream最大数*/
+	uint32_t nb_streams;/*用户配置的流数*/
+	struct netfe_stream_prm *stream;/*用户配置的stream操作*/
 };
 
 struct netfe_stream {
@@ -204,10 +214,10 @@ struct netfe_stream {
 	uint32_t rx_run_len;
 	uint16_t posterr; /* # of time error event handling was postponed */
 	struct {
-		uint64_t rxp;
-		uint64_t rxb;
-		uint64_t txp;
-		uint64_t txb;
+		uint64_t rxp;/*收方向包数*/
+		uint64_t rxb;/*收方向字节数*/
+		uint64_t txp;/*发方向包数*/
+		uint64_t txb;/*发方向字节数*/
 		uint64_t fwp;
 		uint64_t drops;
 		uint64_t rxev[TLE_SEV_NUM];
@@ -228,7 +238,8 @@ struct netfe_stream_list {
 };
 
 struct netfe_lcore {
-	uint32_t snum;  /* max number of streams */
+	/*其后跟的stream数目*/
+    uint32_t snum;  /* max number of streams */
 	struct tle_evq *syneq;
 	struct tle_evq *ereq;
 	struct tle_evq *rxeq;
@@ -240,6 +251,7 @@ struct netfe_lcore {
 		uint64_t rej;
 		uint64_t ter;
 	} tcp_stat;
+	/*用于指定netfe_stream空闲链*/
 	struct netfe_stream_list free;
 	struct netfe_stream_list use;
 };

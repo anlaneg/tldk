@@ -24,8 +24,8 @@
  * IPv4 destination lookup callback.
  */
 static int
-lpm4_dst_lookup(void *data, const struct in_addr *addr,
-	struct tle_dest *res)
+lpm4_dst_lookup(void *data/*私有数据*/, const struct in_addr *addr,
+	struct tle_dest *res/*出参，查询结果*/)
 {
 	int32_t rc;
 	uint32_t idx;
@@ -34,7 +34,7 @@ lpm4_dst_lookup(void *data, const struct in_addr *addr,
 
 	lc = data;
 
-	//查询ipv4路由表
+	//采用addr查询ipv4路由表
 	rc = rte_lpm_lookup(lc->lpm4, rte_be_to_cpu_32(addr->s_addr), &idx);
 	if (rc == 0) {
 		dst = &lc->dst4[idx];
@@ -86,6 +86,7 @@ lcore_lpm_init(struct netbe_lcore *lc)
 
 	sid = rte_lcore_to_socket_id(lc->id);
 
+	/*创建ipv4对应的lpm*/
 	snprintf(str, sizeof(str), "LPM4%u\n", lc->id);
 	lc->lpm4 = rte_lpm_create(str, sid, &lpm4_cfg);
 	RTE_LOG(NOTICE, USER1, "%s(lcore=%u): lpm4=%p;\n",
@@ -93,6 +94,7 @@ lcore_lpm_init(struct netbe_lcore *lc)
 	if (lc->lpm4 == NULL)
 		return -ENOMEM;
 
+	/*创建ipv6对应的lpm*/
 	snprintf(str, sizeof(str), "LPM6%u\n", lc->id);
 	lc->lpm6 = rte_lpm6_create(str, sid, &lpm6_cfg);
 	RTE_LOG(NOTICE, USER1, "%s(lcore=%u): lpm6=%p;\n",
@@ -247,6 +249,7 @@ create_context(struct netbe_lcore *lc, const struct tle_ctx_param *ctx_prm)
 	struct tle_ctx_param cprm;
 
 	if (lc->ctx == NULL) {
+	    /*此core对应的socket id*/
 		sid = rte_lcore_to_socket_id(lc->id);
 
 		rc = lcore_lpm_init(lc);
@@ -269,6 +272,7 @@ create_context(struct netbe_lcore *lc, const struct tle_ctx_param *ctx_prm)
 		frag_cycles = (rte_get_tsc_hz() + MS_PER_S - 1) /
 						MS_PER_S * FRAG_TTL;
 
+		/*创建分片表*/
 		lc->ftbl = rte_ip_frag_table_create(cprm.max_streams,
 			FRAG_TBL_BUCKET_ENTRIES, cprm.max_streams,
 			frag_cycles, sid);
@@ -276,6 +280,7 @@ create_context(struct netbe_lcore *lc, const struct tle_ctx_param *ctx_prm)
 		RTE_LOG(NOTICE, USER1, "%s(lcore=%u): frag_tbl=%p;\n",
 			__func__, lc->id, lc->ftbl);
 
+		/*初始化context*/
 		lc->ctx = tle_ctx_create(&cprm);
 
 		RTE_LOG(NOTICE, USER1, "%s(lcore=%u): proto=%s, ctx=%p;\n",
@@ -347,6 +352,7 @@ create_blocklist(const struct netbe_port *beprt, uint16_t *bl_ports,
 {
 	uint32_t i, j, qid, align_nb_q;
 
+	/*队列对齐*/
 	align_nb_q = rte_align32pow2(beprt->nb_lcore);
 	for (i = 0, j = 0; i < (UINT16_MAX + 1); i++) {
 		qid = (i % align_nb_q) % beprt->nb_lcore;
@@ -367,10 +373,11 @@ netbe_lcore_init(struct netbe_cfg *cfg, const struct tle_ctx_param *ctx_prm)
 
 	/* Create the context and attached queue for each lcore. */
 	rc = 0;
-	sz = sizeof(uint16_t) * UINT16_MAX;
+	sz = sizeof(uint16_t) * UINT16_MAX;/*这里申请128k，每个port占用一个uint16_t*/
 	bl_ports = rte_zmalloc(NULL, sz, RTE_CACHE_LINE_SIZE);
 	for (i = 0; i < cfg->cpu_num; i++) {
 		lc = &cfg->cpu[i];
+		/*遍历当前正处理的cpu负责的所有port*/
 		for (j = 0; j < lc->prtq_num; j++) {
 			memset((uint8_t *)bl_ports, 0, sz);
 			/* create list of blocked ports based on q */

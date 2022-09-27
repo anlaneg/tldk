@@ -41,7 +41,7 @@ netfe_stream_close_tcp(struct netfe_lcore *fe, struct netfe_stream *fes)
  */
 static struct netfe_stream *
 netfe_stream_open_tcp(struct netfe_lcore *fe, struct netfe_sprm *sprm,
-	uint32_t lcore, uint16_t op, uint32_t bidx, uint8_t server_mode)
+	uint32_t lcore, uint16_t op, uint32_t bidx, uint8_t server_mode/*是否为服务端*/)
 {
 	int32_t rc;
 	struct netfe_stream *fes;
@@ -50,6 +50,7 @@ netfe_stream_open_tcp(struct netfe_lcore *fe, struct netfe_sprm *sprm,
 	uint16_t errport;
 	struct tle_tcp_stream_param tprm;
 
+	/*取一个空闲的netfe_stream*/
 	fes = netfe_get_stream(&fe->free);
 	if (fes == NULL) {
 		rte_errno = ENOBUFS;
@@ -57,11 +58,13 @@ netfe_stream_open_tcp(struct netfe_lcore *fe, struct netfe_sprm *sprm,
 	}
 
 	if (server_mode != 0) {
+	    /*如果为服务端，则自syneq中申请rxevent*/
 		tle_event_free(fes->rxev);
 		fes->rxev = tle_event_alloc(fe->syneq, fes);
 	}
 
 	if (fes->rxev == NULL) {
+	    /*申请rxev失败，报错*/
 		netfe_stream_close_tcp(fe, fes);
 		rte_errno = ENOMEM;
 		return NULL;
@@ -88,7 +91,7 @@ netfe_stream_open_tcp(struct netfe_lcore *fe, struct netfe_sprm *sprm,
 	if (op != FWD)
 		tprm.cfg.send_ev = fes->txev;
 
-	fes->s = tle_tcp_stream_open(becfg.cpu[bidx].ctx, &tprm);
+	fes->s = tle_tcp_stream_open(becfg.cpu[bidx/*取此cpu的be context*/].ctx, &tprm);
 
 	if (fes->s == NULL) {
 		rc = rte_errno;
@@ -144,6 +147,7 @@ netfe_lcore_init_tcp(const struct netfe_lcore_prm *prm)
 	eprm.socket_id = rte_lcore_to_socket_id(lcore);
 	eprm.max_events = snum;
 
+	/*申请fe结构体后面跟snum个netfe_stream结构体*/
 	sz = sizeof(*fe) + snum * sizeof(struct netfe_stream);
 	fe = rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE,
 		rte_lcore_to_socket_id(lcore));
@@ -154,7 +158,7 @@ netfe_lcore_init_tcp(const struct netfe_lcore_prm *prm)
 		return -ENOMEM;
 	}
 
-	RTE_PER_LCORE(_fe) = fe;
+	RTE_PER_LCORE(_fe) = fe;/*设置此线程对应的fe*/
 
 	fe->snum = snum;
 	/* initialize the stream pool */
@@ -173,11 +177,14 @@ netfe_lcore_init_tcp(const struct netfe_lcore_prm *prm)
 		fe->txeq == NULL)
 		return -ENOMEM;
 
+	/*指向首个netfe_stream,并逐个设置rxev,txev,erev*/
 	fes = (struct netfe_stream *)(fe + 1);
 	for (i = 0; i != snum; i++) {
+	    /*申请event,并使其指向fes+i*/
 		fes[i].rxev = tle_event_alloc(fe->rxeq, fes + i);
 		fes[i].txev = tle_event_alloc(fe->txeq, fes + i);
 		fes[i].erev = tle_event_alloc(fe->ereq, fes + i);
+		/*将fes[i]号元素存入到fe->free空闲的链表中*/
 		netfe_put_stream(fe, &fe->free, fes + i);
 	}
 
@@ -185,13 +192,14 @@ netfe_lcore_init_tcp(const struct netfe_lcore_prm *prm)
 	/* open all requested streams. */
 	for (i = 0; i != prm->nb_streams; i++) {
 		sprm = &prm->stream[i].sprm;
-		fes = netfe_stream_open_tcp(fe, sprm, lcore, prm->stream[i].op,
-			sprm->bidx, becfg.server);
+		fes = netfe_stream_open_tcp(fe, sprm, lcore, prm->stream[i].op/*用户指定的操作*/,
+			sprm->bidx, becfg.server/*是否为server端*/);
 		if (fes == NULL) {
 			rc = -rte_errno;
 			break;
 		}
 
+		/*显示stream*/
 		netfe_stream_dump(fes, &sprm->local_addr, &sprm->remote_addr);
 
 		if (prm->stream[i].op == FWD) {
@@ -205,6 +213,7 @@ netfe_lcore_init_tcp(const struct netfe_lcore_prm *prm)
 		}
 
 		if (becfg.server == 1) {
+		    /*fes转Listen状态*/
 			rc = tle_tcp_stream_listen(fes->s);
 			RTE_LOG(INFO, USER1,
 				"%s(%u) tle_tcp_stream_listen(stream=%p) "
@@ -213,6 +222,7 @@ netfe_lcore_init_tcp(const struct netfe_lcore_prm *prm)
 			if (rc != 0)
 				break;
 		} else {
+		    /*连接到对端地址*/
 			rc = tle_tcp_stream_connect(fes->s,
 				(const struct sockaddr *)&sprm->remote_addr);
 			RTE_LOG(INFO, USER1,
@@ -679,10 +689,11 @@ netbe_lcore_tcp(void)
 	if (lc == NULL)
 		return;
 
+	/*当前lc上有多个port queue,遍历这些queue,针对其执行收发*/
 	for (i = 0; i != lc->prtq_num; i++) {
-		netbe_rx(lc, i);
+		netbe_rx(lc, i);/*自rx收包并交给协议栈*/
 		tle_tcp_process(lc->ctx, TCP_MAX_PROCESS);
-		netbe_tx(lc, i);
+		netbe_tx(lc, i);/*向tx发包*/
 	}
 }
 

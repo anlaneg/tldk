@@ -500,6 +500,7 @@ _iovec_to_mbsegs(struct iovec *iv, uint32_t seglen, struct rte_mbuf *mb[],
 		slen = RTE_MIN(slen, seglen - m->data_len);
 		len = RTE_MIN(iv->iov_len - tlen, slen);
 		dst = rte_pktmbuf_append(m, len);
+		/*复制填充dst*/
 		rte_memcpy(dst, (uint8_t *)iv->iov_base + tlen, len);
 		tlen += len;
 		if (len != slen)
@@ -509,6 +510,7 @@ _iovec_to_mbsegs(struct iovec *iv, uint32_t seglen, struct rte_mbuf *mb[],
 	iv->iov_base = (uint8_t *)iv->iov_base + tlen;
 	iv->iov_len -= tlen;
 
+	/*填充到第$i的buffer*/
 	return i;
 }
 

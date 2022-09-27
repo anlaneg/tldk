@@ -46,8 +46,8 @@ extern const struct in6_addr tle_ipv6_none;
 union l4_ports {
 	uint32_t raw;
 	struct {
-		uint16_t src;
-		uint16_t dst;
+		uint16_t src;/*源端口*/
+		uint16_t dst;/*目的端口*/
 	};
 };
 

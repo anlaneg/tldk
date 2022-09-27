@@ -28,9 +28,10 @@ struct stbl_entry {
 };
 
 struct shtbl {
+    /*实体表数目*/
 	uint32_t nb_ent;  /* max number of entries in the table. */
 	rte_spinlock_t l; /* lock to protect the hash table *///锁，保护t
-	struct rte_hash *t;
+	struct rte_hash *t;/*hash表，索引表*/
 	struct stbl_entry *ent;//实体表
 } __rte_cache_aligned;
 
@@ -39,11 +40,13 @@ struct stbl {
 	struct shtbl ht[TLE_VNUM];
 };
 
+/*src-port,dst-port,src-ip,dst-ip 四元组*/
 struct stbl4_key {
 	union l4_ports port;
 	union ipv4_addrs addr;
 } __attribute__((__packed__));
 
+/*ipv6版本的四元组*/
 struct stbl6_key {
 	union l4_ports port;
 	union ipv6_addrs addr;

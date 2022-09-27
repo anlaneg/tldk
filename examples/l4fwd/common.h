@@ -18,6 +18,7 @@
 
 #include <rte_arp.h>
 
+/*收到signum，置强制退出*/
 static void
 sig_handle(int signum)
 {
@@ -35,6 +36,7 @@ netfe_stream_dump(const struct netfe_stream *fes, struct sockaddr_storage *la,
 	char laddr[INET6_ADDRSTRLEN];
 	char raddr[INET6_ADDRSTRLEN];
 
+	/*取srcport,dstport*/
 	if (la->ss_family == AF_INET) {
 
 		l4 = (struct sockaddr_in *)la;
@@ -57,6 +59,7 @@ netfe_stream_dump(const struct netfe_stream *fes, struct sockaddr_storage *la,
 		return;
 	}
 
+	/*格式化本端地址/远端地址*/
 	format_addr(la, laddr, sizeof(laddr));
 	format_addr(ra, raddr, sizeof(raddr));
 
@@ -122,8 +125,8 @@ netfe_get_stream(struct netfe_stream_list *list)
 }
 
 static inline void
-netfe_put_streams(struct netfe_lcore *fe, struct netfe_stream_list *list,
-	struct netfe_stream *fs[], uint32_t num)
+netfe_put_streams(struct netfe_lcore *fe, struct netfe_stream_list *list/*被添加的列表*/,
+	struct netfe_stream *fs[]/*要添加的元素*/, uint32_t num/*要添加的元素数目*/)
 {
 	uint32_t i, n;
 
@@ -132,16 +135,20 @@ netfe_put_streams(struct netfe_lcore *fe, struct netfe_stream_list *list,
 		RTE_LOG(ERR, USER1, "%s: list overflow by %u\n", __func__,
 			num - n);
 
+	/*将fs指定的n个元素，串在list->head的头部*/
 	for (i = 0; i != n; i++)
 		LIST_INSERT_HEAD(&list->head, fs[i], link);
+	/*list长度增加*/
 	list->num += n;
 }
 
+/*将s存入到list中*/
 static inline void
 netfe_put_stream(struct netfe_lcore *fe, struct netfe_stream_list *list,
 	struct netfe_stream *s)
 {
 	if (list->num == fe->snum) {
+	    /*检查是否已满*/
 		RTE_LOG(ERR, USER1, "%s: list is full\n", __func__);
 		return;
 	}
@@ -164,6 +171,7 @@ netfe_stream_close(struct netfe_lcore *fe, struct netfe_stream *fes)
 	tle_event_free(fes->rxev);
 	tle_event_free(fes->erev);
 	memset(fes, 0, sizeof(*fes));
+	/*将fes存入到空闲链表*/
 	netfe_put_stream(fe, &fe->free, fes);
 }
 
@@ -244,6 +252,7 @@ netbe_lcore_setup(struct netbe_lcore *lc)
 			__func__, i, lc->prtq[i].port.id, lc->prtq[i].rxqid,
 			proto_name[lc->proto], lc->prtq[i].dev);
 
+		/*设置接口的rx回调*/
 		rc = setup_rx_cb(&lc->prtq[i].port, lc, lc->prtq[i].rxqid,
 			becfg.arp);
 		if (rc < 0)
@@ -507,6 +516,7 @@ send_arp_reply(struct netbe_dev *dev, struct pkt_buf *pb)
 	uint32_t i, n, num;
 	struct rte_mbuf **m;
 
+	/*pb上有pb->num个arp请求报文，逐个填充*/
 	m = pb->pkt;
 	num = pb->num;
 	for (i = 0; i != num; i++) {
@@ -514,6 +524,7 @@ send_arp_reply(struct netbe_dev *dev, struct pkt_buf *pb)
 		NETBE_PKT_DUMP(m[i]);
 	}
 
+	/*已完成填充，在此位置针对port进行arp响应*/
 	n = rte_eth_tx_burst(dev->port.id, dev->txqid, m, num);
 	NETBE_TRACE("%s: sent n=%u arp replies\n", __func__, n);
 
@@ -533,6 +544,7 @@ netbe_rx(struct netbe_lcore *lc, uint32_t pidx)
 	int32_t rc[MAX_PKT_BURST];
 	struct pkt_buf *abuf;
 
+	/*自指定port的指定队列，收取一组报文*/
 	n = rte_eth_rx_burst(lc->prtq[pidx].port.id,
 			lc->prtq[pidx].rxqid, pkt, RTE_DIM(pkt));
 
@@ -542,14 +554,17 @@ netbe_rx(struct netbe_lcore *lc, uint32_t pidx)
 			__func__, lc->id, lc->prtq[pidx].port.id,
 			lc->prtq[pidx].rxqid, n);
 
+		/*处理收取的报文*/
 		k = tle_rx_bulk(lc->prtq[pidx].dev, pkt, rp, rc, n);
 
+		/*增加统计计数*/
 		lc->prtq[pidx].rx_stat.up += k;
 		lc->prtq[pidx].rx_stat.drop += n - k;
 		NETBE_TRACE("%s(%u): tle_%s_rx_bulk(%p, %u) returns %u\n",
 			__func__, lc->id, proto_name[lc->proto],
 			lc->prtq[pidx].dev, n, k);
 
+		/*释放掉tle_rx_bulk未处理的报文*/
 		for (j = 0; j != n - k; j++) {
 			NETBE_TRACE("%s:%d(port=%u) rp[%u]={%p, %d};\n",
 				__func__, __LINE__, lc->prtq[pidx].port.id,
@@ -563,6 +578,7 @@ netbe_rx(struct netbe_lcore *lc, uint32_t pidx)
 	if (abuf->num == 0)
 		return;
 
+	/*有arp请求，响应arp*/
 	send_arp_reply(&lc->prtq[pidx], abuf);
 }
 
@@ -572,16 +588,20 @@ netbe_tx(struct netbe_lcore *lc, uint32_t pidx)
 	uint32_t j, k, n;
 	struct rte_mbuf **mb;
 
+	/*取此pidx对应的tx buffer数目*/
 	n = lc->prtq[pidx].tx_buf.num;
+	/*空闲的元素数*/
 	k = RTE_DIM(lc->prtq[pidx].tx_buf.pkt) - n;
 	mb = lc->prtq[pidx].tx_buf.pkt;
 
+	/*有大于一半的空间是空闲的*/
 	if (k >= RTE_DIM(lc->prtq[pidx].tx_buf.pkt) / 2) {
 		j = tle_tx_bulk(lc->prtq[pidx].dev, mb + n, k);
 		n += j;
 		lc->prtq[pidx].tx_stat.down += j;
 	}
 
+	/*无报文，退出*/
 	if (n == 0)
 		return;
 
@@ -590,12 +610,15 @@ netbe_tx(struct netbe_lcore *lc, uint32_t pidx)
 		__func__, lc->id, proto_name[lc->proto],
 		lc->prtq[pidx].dev, j, n);
 
+	/*dump这n个报文*/
 	for (j = 0; j != n; j++)
 		NETBE_PKT_DUMP(mb[j]);
 
+	/*发送这n个包*/
 	k = rte_eth_tx_burst(lc->prtq[pidx].port.id,
 			lc->prtq[pidx].txqid, mb, n);
 
+	/*增加统计*/
 	lc->prtq[pidx].tx_stat.out += k;
 	lc->prtq[pidx].tx_stat.drop += n - k;
 	NETBE_TRACE("%s(%u): rte_eth_tx_burst(%u, %u, %u) returns %u\n",
@@ -614,6 +637,7 @@ netbe_lcore(void)
 	uint32_t i;
 	struct netbe_lcore *lc;
 
+	/*取当前线程对应的lc*/
 	lc = RTE_PER_LCORE(_be);
 	if (lc == NULL)
 		return;

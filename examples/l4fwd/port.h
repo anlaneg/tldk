@@ -21,9 +21,11 @@ prepare_hash_key(struct netbe_port *uprt, uint8_t key_size, uint16_t family)
 {
 	uint32_t align_nb_q;
 
+	/*将负责此port的核对齐成2的幂*/
 	align_nb_q = rte_align32pow2(uprt->nb_lcore);
-	memset(uprt->hash_key, 0, RSS_HASH_KEY_LENGTH);
+	memset(uprt->hash_key, 0, RSS_HASH_KEY_LENGTH);/*全清0*/
 	uprt->hash_key_size = key_size;
+	/*在特别的位置填充对齐的q*/
 	if (family == AF_INET)
 		uprt->hash_key[RSS_HASH_KEY_DEST_PORT_LOC_IPV4] = align_nb_q;
 	else
@@ -38,6 +40,7 @@ update_rss_conf(struct netbe_port *uprt,
 	uint8_t hash_key_size;
 
 	if (uprt->nb_lcore > 1) {
+	    /*负责此port的cpu数超过1*/
 		if (dev_info->hash_key_size > 0)
 			hash_key_size = dev_info->hash_key_size;
 		else {
@@ -50,14 +53,17 @@ update_rss_conf(struct netbe_port *uprt,
 		if (uprt->ipv4 != INADDR_ANY &&
 				memcmp(&uprt->ipv6, &in6addr_any,
 				sizeof(uprt->ipv6)) != 0) {
+		    /*按口同时使能ipv4,ipv6*/
 			RTE_LOG(ERR, USER1,
 				"%s: RSS for both IPv4 and IPv6 not "
 				"supported!\n", __func__);
 			return -EINVAL;
 		} else if (uprt->ipv4 != INADDR_ANY) {
+		    /*填充ipv4 hash key*/
 			prepare_hash_key(uprt, hash_key_size, AF_INET);
 		} else if (memcmp(&uprt->ipv6, &in6addr_any, sizeof(uprt->ipv6))
 				!= 0) {
+		    /*填充ipv6 hash key*/
 			prepare_hash_key(uprt, hash_key_size, AF_INET6);
 		} else {
 			RTE_LOG(ERR, USER1,
@@ -65,6 +71,8 @@ update_rss_conf(struct netbe_port *uprt,
 				__func__);
 			return -EINVAL;
 		}
+
+		/*采用特别的rss hash，按目的port进行分发*/
 		port_conf->rxmode.mq_mode = ETH_MQ_RX_RSS;
 		if (proto == TLE_PROTO_TCP)
 			port_conf->rx_adv_conf.rss_conf.rss_hf = ETH_RSS_TCP;
@@ -158,8 +166,10 @@ port_init(struct netbe_port *uprt, uint32_t proto)
 	struct rte_eth_conf port_conf;
 	struct rte_eth_dev_info dev_info;
 
+	/*取指定port的dev infor*/
 	rte_eth_dev_info_get(uprt->id, &dev_info);
 	if ((dev_info.rx_offload_capa & uprt->rx_offload) != uprt->rx_offload) {
+	    /*遇到设备不支持的rx offload能力，报错*/
 		RTE_LOG(ERR, USER1,
 			"port#%u supported/requested RX offloads don't match, "
 			"supported: %#" PRIx64 ", requested: %#" PRIx64 ";\n",
@@ -168,6 +178,7 @@ port_init(struct netbe_port *uprt, uint32_t proto)
 		return -EINVAL;
 	}
 	if ((dev_info.tx_offload_capa & uprt->tx_offload) != uprt->tx_offload) {
+	    /*遇到设备不支持的tx offload能力，报错*/
 		RTE_LOG(ERR, USER1,
 			"port#%u supported/requested TX offloads don't match, "
 			"supported: %#" PRIx64 ", requested: %#" PRIx64 ";\n",
@@ -178,20 +189,26 @@ port_init(struct netbe_port *uprt, uint32_t proto)
 
 	port_conf = port_conf_default;
 	if ((uprt->rx_offload & RX_CSUM_OFFLOAD) != 0) {
+	    /*rx方向开启check sum offload能力*/
 		RTE_LOG(ERR, USER1, "%s(%u): enabling RX csum offload;\n",
 			__func__, uprt->id);
 		port_conf.rxmode.offloads |= uprt->rx_offload & RX_CSUM_OFFLOAD;
 	}
+	/*指明rx方向容许的最大packet长度*/
 	port_conf.rxmode.max_rx_pkt_len = uprt->mtu + RTE_ETHER_CRC_LEN;
+	/*超时1518，指明使能jumbo能力*/
 	if (port_conf.rxmode.max_rx_pkt_len > RTE_ETHER_MAX_LEN)
 		port_conf.rxmode.offloads |= DEV_RX_OFFLOAD_JUMBO_FRAME;
 
+	/*更新rss hash，以便按dst port进行分发*/
 	rc = update_rss_conf(uprt, &dev_info, &port_conf, proto);
 	if (rc != 0)
 		return rc;
 
+	/*指明tx方向offload能力*/
 	port_conf.txmode.offloads = uprt->tx_offload;
 
+	/*配置此接口，rx与Tx相同，菜uprt->nb_lcore个*/
 	rc = rte_eth_dev_configure(uprt->id, uprt->nb_lcore, uprt->nb_lcore,
 			&port_conf);
 	RTE_LOG(NOTICE, USER1,
@@ -204,6 +221,7 @@ port_init(struct netbe_port *uprt, uint32_t proto)
 	return 0;
 }
 
+/*利用mp初始化uprt端口的rx,tx队列*/
 static int
 queue_init(struct netbe_port *uprt, struct rte_mempool *mp)
 {
@@ -212,19 +230,23 @@ queue_init(struct netbe_port *uprt, struct rte_mempool *mp)
 	uint32_t nb_rxd, nb_txd;
 	struct rte_eth_dev_info dev_info;
 
+	/*取port信息*/
 	rte_eth_dev_info_get(uprt->id, &dev_info);
 
+	/*取设备对应的socket*/
 	socket = rte_eth_dev_socket_id(uprt->id);
 
 	dev_info.default_rxconf.rx_drop_en = 1;
 
+	/*rx,tx的描述符数目*/
 	nb_rxd = RTE_MIN(RX_RING_SIZE, dev_info.rx_desc_lim.nb_max);
 	nb_txd = RTE_MIN(TX_RING_SIZE, dev_info.tx_desc_lim.nb_max);
 
 	dev_info.default_txconf.tx_free_thresh = nb_txd / 2;
 
+	/*由于有nb_lcore负责此port，故rx队列有nb_lcore个，这里进行初始化*/
 	for (q = 0; q < uprt->nb_lcore; q++) {
-		rc = rte_eth_rx_queue_setup(uprt->id, q, nb_rxd,
+		rc = rte_eth_rx_queue_setup(uprt->id, q, nb_rxd/*rx描述符数量*/,
 			socket, &dev_info.default_rxconf, mp);
 		if (rc < 0) {
 			RTE_LOG(ERR, USER1,
@@ -234,6 +256,7 @@ queue_init(struct netbe_port *uprt, struct rte_mempool *mp)
 		}
 	}
 
+	/*tx队列初始化*/
 	for (q = 0; q < uprt->nb_lcore; q++) {
 		rc = rte_eth_tx_queue_setup(uprt->id, q, nb_txd,
 			socket, &dev_info.default_txconf);
@@ -253,10 +276,13 @@ queue_init(struct netbe_port *uprt, struct rte_mempool *mp)
 static int
 check_lcore(uint32_t lc)
 {
+    /*检查此core是否被启用*/
 	if (rte_lcore_is_enabled(lc) == 0) {
 		RTE_LOG(ERR, USER1, "lcore %u is not enabled\n", lc);
 		return -EINVAL;
 	}
+
+	/*检查此core是否已被占用*/
 	if (rte_eal_get_lcore_state(lc) == RUNNING) {
 		RTE_LOG(ERR, USER1, "lcore %u already in use\n", lc);
 		return -EINVAL;
@@ -356,6 +382,7 @@ frag_pool_init(uint32_t sid, uint32_t mpool_buf_num)
 	return 0;
 }
 
+/*取指定logic core对应的netbe_lcore结构*/
 static struct netbe_lcore *
 find_initilized_lcore(struct netbe_cfg *cfg, uint32_t lc_num)
 {
@@ -382,7 +409,7 @@ netbe_port_init(struct netbe_cfg *cfg)
 	//遍历所有的端口
 	for (i = 0; i != cfg->prt_num; i++) {
 		prt = cfg->prt + i;
-		//配置接口
+		//配置接口rx,tx,配置rss
 		rc = port_init(prt, cfg->proto);
 		if (rc != 0) {
 			RTE_LOG(ERR, USER1,
@@ -390,12 +417,17 @@ netbe_port_init(struct netbe_cfg *cfg)
 				__func__, prt->id, rc);
 			return rc;
 		}
+
+		/*取接口mac地址*/
 		rte_eth_macaddr_get(prt->id, &prt->mac);
+
 		if (cfg->promisc)
 			//设置混杂模式
 			rte_eth_promiscuous_enable(prt->id);
 
+		/*遍历负责此port的所有core*/
 		for (j = 0; j < prt->nb_lcore; j++) {
+		    /*检查此core是否可用*/
 			rc = check_lcore(prt->lcore_id[j]);
 			if (rc != 0) {
 				RTE_LOG(ERR, USER1,
@@ -404,22 +436,25 @@ netbe_port_init(struct netbe_cfg *cfg)
 				return rc;
 			}
 
+			/*除socket id,使其从1开始编号*/
 			sid = rte_lcore_to_socket_id(prt->lcore_id[j]) + 1;
 			assert(sid < RTE_DIM(mpool));
 
 			if (mpool[sid] == NULL) {
+			    /*初始化此sid对应的mbuf pool*/
 				rc = pool_init(sid, cfg->mpool_buf_num);
 				if (rc != 0)
 					return rc;
 			}
 
 			if (frag_mpool[sid] == NULL) {
+			    /*初始化sid上的frag pool*/
 				rc = frag_pool_init(sid, cfg->mpool_buf_num);
 				if (rc != 0)
 					return rc;
 			}
 
-			//初始化队列
+			//利用此socket对应的pool初始化port队列
 			rc = queue_init(prt, mpool[sid]);
 			if (rc != 0) {
 				RTE_LOG(ERR, USER1,
@@ -433,6 +468,7 @@ netbe_port_init(struct netbe_cfg *cfg)
 			 * per lcore. */
 			lc = find_initilized_lcore(cfg, prt->lcore_id[j]);
 			if (lc == NULL) {
+			    /*首次填充此lc,分配一个空间，并填充*/
 				lc = &cfg->cpu[cfg->cpu_num];
 				lc->id = prt->lcore_id[j];
 				lc->proto = becfg.proto;
@@ -453,6 +489,7 @@ netbe_port_init(struct netbe_cfg *cfg)
 			lc->prtq_num++;
 		}
 	}
+	/*显示be的配置*/
 	log_netbe_cfg(cfg);
 
 	return 0;

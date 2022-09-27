@@ -80,8 +80,10 @@ struct tldk_stbl {
         struct tle_evq *rxeq;
         struct tle_evq *txeq;
         struct tldk_sock_list free;
+        /*监听一组tldk_sock*/
         struct tldk_sock_list lstn;
         struct tldk_sock_list use;
+        /*socket number基准base*/
         int32_t nosd;
         /*socket数目*/
         uint32_t snum;
@@ -89,13 +91,15 @@ struct tldk_stbl {
         struct tldk_sock *sd;
 };
 
-
+/*socket转socket描述符*/
 #define SOCK_TO_SD(s)   (stbl.nosd + ((s) - stbl.sd))
+/*socket描述符转socket*/
 #define SD_TO SOCK(d)   (stbl.sd + ((d) - stbl.nosd))
 
 /* One socket/file table per worker */
 extern struct tldk_stbl stbl;
 
+/*由sd获取对应的tldk_sock*/
 static inline struct tldk_sock *
 sd_to_sock(int32_t sd)
 {

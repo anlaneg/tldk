@@ -39,6 +39,7 @@ stbl_init(struct stbl *st, uint32_t num, int32_t socket)
 	struct rte_hash_parameters hprm;
 	char buf[RTE_HASH_NAMESIZE];
 
+	/*对num进行1.25倍的放大*/
 	num = RTE_MAX(5 * num / 4, 0x10U);
 
 	memset(&hprm, 0, sizeof(hprm));
@@ -48,6 +49,7 @@ stbl_init(struct stbl *st, uint32_t num, int32_t socket)
 
 	rc = 0;
 
+	/*创建ipv4对应的hash表*/
 	snprintf(buf, sizeof(buf), "stbl4@%p", st);
 	hprm.key_len = sizeof(struct stbl4_key);
 	st->ht[TLE_V4].t = rte_hash_create(&hprm);
@@ -55,6 +57,7 @@ stbl_init(struct stbl *st, uint32_t num, int32_t socket)
 		rc = (rte_errno != 0) ? -rte_errno : -ENOMEM;
 
 	if (rc == 0) {
+	    /*创建ipv6对应的hash表*/
 		snprintf(buf, sizeof(buf), "stbl6@%p", st);
 		hprm.key_len = sizeof(struct stbl6_key);
 		st->ht[TLE_V6].t = rte_hash_create(&hprm);
@@ -62,9 +65,10 @@ stbl_init(struct stbl *st, uint32_t num, int32_t socket)
 			rc = (rte_errno != 0) ? -rte_errno : -ENOMEM;
 	}
 
+	/*初始化实体表*/
 	for (i = 0; i != RTE_DIM(st->ht) && rc == 0; i++) {
 
-		sz = sizeof(*st->ht[i].ent) * num;
+		sz = sizeof(*st->ht[i].ent) * num;/*实体表内存大小，每个实体大小为1个指针*/
 		st->ht[i].ent = rte_zmalloc_socket(NULL, sz,
 			RTE_CACHE_LINE_SIZE, socket);
 		if (st->ht[i].ent == NULL)

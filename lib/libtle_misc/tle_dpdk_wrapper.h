@@ -125,6 +125,7 @@ _rte_ring_mc_dequeue_burst(struct rte_ring *r, void **obj_table, uint32_t n)
 	return rte_ring_mc_dequeue_burst(r, (void **)obj_table, n);
 }
 
+/*r ring中一次性入n个object*/
 static inline uint32_t
 _rte_ring_enqueue_burst(struct rte_ring *r, void * const *obj_table, uint32_t n)
 {

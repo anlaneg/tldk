@@ -31,10 +31,15 @@ extern "C" {
 #endif
 
 enum {
+    /*close状态*/
 	TCP_ST_CLOSED,
+	/*监听状态*/
 	TCP_ST_LISTEN,
+	/*syn已发送状态*/
 	TCP_ST_SYN_SENT,
+	/*syn已收到状态*/
 	TCP_ST_SYN_RCVD,
+	/*est状态*/
 	TCP_ST_ESTABLISHED,
 	TCP_ST_FIN_WAIT_1,
 	TCP_ST_FIN_WAIT_2,
@@ -52,12 +57,16 @@ enum {
 	TCP_OP_CLOSE =   0x8,
 };
 
+/*tcp控制块*/
 struct tcb {
-	volatile uint16_t state;//TCP状态
+    //TCP状态
+	volatile uint16_t state;
 	volatile uint16_t uop; /* operations by user performed */
 	struct {
-		uint32_t nxt;//下次收到的报文起始序号
-		uint32_t irs; /* initial received sequence */ //本次收到的seq
+	    //下次收到的报文起始序号
+		uint32_t nxt;
+		//本次收到的seq
+		uint32_t irs; /* initial received sequence */
 		uint32_t wnd;
 		uint32_t ts;
 		struct {
@@ -96,10 +105,12 @@ struct tcb {
 
 struct tle_tcp_stream {
 
-	struct tle_stream s;//低层公共结构
+    //低层公共结构
+	struct tle_stream s;
 
 	uint32_t flags;
-	rte_atomic32_t use;//引用计数
+	//引用计数
+	rte_atomic32_t use;
 
 	struct stbl_entry *ste;     /* entry in streams table. */
 	struct tcb tcb;
@@ -114,6 +125,7 @@ struct tle_tcp_stream {
 	} err;
 
 	struct {
+	    /*收到监听*/
 		struct rte_ring *q;     /* listen (syn) queue */
 		struct ofo *ofo;
 		struct tle_event *ev;    /* user provided recv event. */
@@ -127,10 +139,11 @@ struct tle_tcp_stream {
 			uint32_t nb_max;   /* number of drbs per stream. */
 			struct rte_ring *r;
 		} drb;
+		/*tx方向报文存放queue*/
 		struct rte_ring *q;  /* (re)tx queue */
 		struct tle_event *ev;
 		struct tle_stream_cb cb;
-		struct tle_dest dst;
+		struct tle_dest dst;/*目的路由等情况*/
 	} tx __rte_cache_aligned;
 
 } __rte_cache_aligned;
@@ -175,7 +188,9 @@ struct stream_szofs {
 };
 
 struct tcp_streams {
+    /*stream table,用于通过4元组查询stream*/
 	struct stbl st;
+	/*轮子定时器，用于管理timer*/
 	struct tle_timer_wheel *tmr; /* timer wheel */
 	struct rte_ring *tsq;        /* to-send streams queue */
 	struct tle_memtank *mts;     /* memtank to allocate streams from */
@@ -183,9 +198,12 @@ struct tcp_streams {
 	struct stream_szofs szofs;   /* size and offsets for stream data */
 };
 
+/*取ctx中对应的tcp_streams*/
 #define CTX_TCP_STREAMS(ctx)	((struct tcp_streams *)(ctx)->streams.buf)
 #define CTX_TCP_STLB(ctx)	(&CTX_TCP_STREAMS(ctx)->st)
+/*取定时器管理器*/
 #define CTX_TCP_TMWHL(ctx)	(CTX_TCP_STREAMS(ctx)->tmr)
+/*取tsq队列，取streams queue*/
 #define CTX_TCP_TSQ(ctx)	(CTX_TCP_STREAMS(ctx)->tsq)
 #define CTX_TCP_SDR(ctx)	(&CTX_TCP_STREAMS(ctx)->dr)
 #define CTX_TCP_MTS(ctx)	(CTX_TCP_STREAMS(ctx)->mts)

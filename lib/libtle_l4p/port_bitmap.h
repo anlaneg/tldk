@@ -26,14 +26,18 @@ extern "C" {
 
 #define MAX_PORT_NUM	(UINT16_MAX + 1)
 
+/*取p对应的block index*/
 #define PORT_BLK(p)	((p) / (sizeof(uint32_t) * CHAR_BIT))
+/*取p对应的具体block中的位置*/
 #define PORT_IDX(p)	((p) % (sizeof(uint32_t) * CHAR_BIT))
 
 #define	MAX_PORT_BLK	PORT_BLK(MAX_PORT_NUM)
 
 struct tle_pbm {
+    /*记录bm中有多少个bit被占用*/
 	uint32_t nb_set; /* number of bits set. */
 	uint32_t blk;    /* last block with free entry. */
+	/*标记port,每个port占用bit*/
 	uint32_t bm[MAX_PORT_BLK];
 };
 
@@ -45,6 +49,7 @@ tle_pbm_init(struct tle_pbm *pbm, uint32_t blk)
 	pbm->blk = blk;
 }
 
+/*设置port*/
 static inline void
 tle_pbm_set(struct tle_pbm *pbm, uint16_t port)
 {

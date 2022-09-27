@@ -51,10 +51,13 @@ extern "C" {
  */
 
 struct tle_timer_wheel_args {
+    /*定义一个tick的大小*/
 	uint32_t tick_size; /** tick size in units */
 
+	/*在哪个numa node上申请内存*/
 	int32_t socket_id; /**< socket ID to allocate memory for. */
 
+	/*timer最大数*/
 	uint32_t max_timer; /** maximum number of timers */
 };
 

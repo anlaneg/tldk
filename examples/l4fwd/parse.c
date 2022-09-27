@@ -116,6 +116,7 @@ static const struct option long_opt[] = {
 	{NULL, 0, 0, 0}
 };
 
+/*解析数字*/
 static int
 parse_uint_val(__rte_unused const char *key, const char *val, void *prm)
 {
@@ -312,8 +313,13 @@ parse_kvargs(const char *arg, const char *keys_man[], uint32_t nb_man,
 	return 0;
 }
 
+/*解析报文内容，填充port信息
+ * port配置格式：port=<uint>,lcore=<uint>[-<uint>],[lcore=<uint>[-<uint>],]\
+   [rx_offload=<uint>,tx_offload=<uint>,mtu=<uint>,ipv4=<ipv4>,ipv6=<ipv6>]
+ * */
 int
-parse_netbe_arg(struct netbe_port *prt, const char *arg, rte_cpuset_t *pcpu)
+parse_netbe_arg(struct netbe_port *prt/*出参，待填充的port*/,
+        const char *arg/*port配置*/, rte_cpuset_t *pcpu/*出参，port的setset情况*/)
 {
 	int32_t rc;
 	uint32_t i, j, nc;
@@ -332,12 +338,12 @@ parse_netbe_arg(struct netbe_port *prt, const char *arg, rte_cpuset_t *pcpu)
 	};
 
 	static const arg_handler_t hndl[] = {
+		parse_uint_val,/*port按数字解析*/
+		parse_lcore_list_val,/*lcore按列表解析*/
+		parse_uint_val,/*mtu按数字解析*/
+		parse_uint_val,/*rx_offload按数字解析*/
 		parse_uint_val,
-		parse_lcore_list_val,
-		parse_uint_val,
-		parse_uint_val,
-		parse_uint_val,
-		parse_ipv4_val,
+		parse_ipv4_val,/*ipv4解析*/
 		parse_ipv6_val,
 	};
 
@@ -346,6 +352,7 @@ parse_netbe_arg(struct netbe_port *prt, const char *arg, rte_cpuset_t *pcpu)
 	memset(val, 0, sizeof(val));
 	val[2].u64 = RTE_ETHER_MAX_LEN - RTE_ETHER_CRC_LEN;
 
+	/*解析keys,填充val*/
 	rc = parse_kvargs(arg, keys_man, RTE_DIM(keys_man),
 		keys_opt, RTE_DIM(keys_opt), hndl, val);
 	if (rc != 0)
@@ -353,12 +360,14 @@ parse_netbe_arg(struct netbe_port *prt, const char *arg, rte_cpuset_t *pcpu)
 
 	prt->id = val[0].u64;
 
+	/*检查val[1]中有多少cpu*/
 	for (i = 0, nc = 0; i < RTE_MAX_LCORE; i++)
 		nc += CPU_ISSET(i, &val[1].cpuset);
 	prt->lcore_id = rte_zmalloc(NULL, nc * sizeof(prt->lcore_id[0]),
 		RTE_CACHE_LINE_SIZE);
 	prt->nb_lcore = nc;
 
+	/*设置负责此port处理的cpu*/
 	for (i = 0, j = 0; i < RTE_MAX_LCORE; i++)
 		if (CPU_ISSET(i, &val[1].cpuset))
 			prt->lcore_id[j++] = i;
@@ -559,6 +568,7 @@ parse_netfe_arg(struct netfe_stream_prm *sp, const char *arg)
 {
 	int32_t rc;
 
+	/*必选项*/
 	static const char *keys_man[] = {
 		"lcore",
 		"op",
@@ -568,6 +578,7 @@ parse_netfe_arg(struct netfe_stream_prm *sp, const char *arg)
 		"rport",
 	};
 
+	/*可选项*/
 	static const char *keys_opt[] = {
 		"txlen",
 		"fwladdr",
@@ -598,6 +609,7 @@ parse_netfe_arg(struct netfe_stream_prm *sp, const char *arg)
 
 	memset(val, 0, sizeof(val));
 	val[11].u64 = LCORE_ID_ANY;
+	/*解析参数*/
 	rc = parse_kvargs(arg, keys_man, RTE_DIM(keys_man),
 		keys_opt, RTE_DIM(keys_opt), hndl, val);
 	if (rc != 0)
@@ -717,6 +729,7 @@ netfe_parse_cfg(const char *fname, struct netfe_lcore_prm *lp)
 	struct netfe_stream_prm *sp;
 	char line[LINE_MAX];
 
+	/*打开配置文件*/
 	f = fopen(fname, "r");
 	if (f == NULL) {
 		RTE_LOG(ERR, USER1, "%s failed to open file \"%s\"\n",
@@ -743,6 +756,7 @@ netfe_parse_cfg(const char *fname, struct netfe_lcore_prm *lp)
 			;
 
 		if (n == lp->max_streams) {
+		    /*已配置了max_streams条流，退出*/
 			RTE_LOG(ERR, USER1,
 				"%s(%s) number of entries exceed max streams "
 				"value: %u\n",
@@ -752,6 +766,7 @@ netfe_parse_cfg(const char *fname, struct netfe_lcore_prm *lp)
 		}
 
 		if (n == num) {
+		    /*n已达到当前申请的最大值，执行扩容*/
 			num += DEF_LINE_NUM;
 			sz = sizeof(sp[0]) * num;
 			sp = realloc(sp, sizeof(sp[0]) * num);
@@ -766,15 +781,16 @@ netfe_parse_cfg(const char *fname, struct netfe_lcore_prm *lp)
 			memset(&sp[n], 0, sizeof(sp[0]) * (num - n));
 		}
 
+		/*记录当前行号*/
 		sp[n].line = ln + 1;
-		rc = parse_netfe_arg(sp + n, s);
+		rc = parse_netfe_arg(sp + n/*待填充的区域*/, s/*指向配置内容*/);
 		rc = (rc != 0) ? rc : check_netfe_arg(sp + n);
 		if (rc != 0) {
 			RTE_LOG(ERR, USER1, "%s(%s) failed to parse line %u\n",
 				__func__, fname, sp[n].line);
 			break;
 		}
-		n++;
+		n++;/*有效stream增加*/
 	}
 
 	fclose(f);
@@ -854,8 +870,10 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 	while ((opt = getopt_long(argc, argv, "aB:C:c:LPR:S:M:TUb:f:s:v:H:K:W:w:",
 			long_opt, &opt_idx)) != EOF) {
 		if (opt == OPT_SHORT_ARP) {
+		    /*开启arp reponse*/
 			cfg->arp = 1;
 		} else if (opt == OPT_SHORT_SBULK) {
+		    /*发送时，bulk数目*/
 			rc = parse_uint_val(NULL, optarg, &v);
 			if (rc < 0)
 				rte_exit(EXIT_FAILURE, "%s: invalid value: %s "
@@ -870,6 +888,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					__func__, optarg, opt);
 			ctx_prm->flags = v;
 		} else if (opt == OPT_SHORT_MBUFNUM) {
+		    /*每个pool中mbuf数目*/
 			rc = parse_uint_val(NULL, optarg, &v);
 			if (rc < 0)
 				rte_exit(EXIT_FAILURE, "%s: invalid value: %s "
@@ -877,8 +896,10 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					__func__, optarg, opt);
 			cfg->mpool_buf_num = v;
 		} else if (opt == OPT_SHORT_PROMISC) {
+		    /*使能混杂模式*/
 			cfg->promisc = 1;
 		} else if (opt == OPT_SHORT_RBUFS) {
+		    /*每个stream的最大收buffer*/
 			rc = parse_uint_val(NULL, optarg, &v);
 			if (rc < 0)
 				rte_exit(EXIT_FAILURE, "%s: invalid value: %s "
@@ -886,6 +907,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					__func__, optarg, opt);
 			ctx_prm->max_stream_rbufs = v;
 		} else if (opt == OPT_SHORT_SBUFS) {
+		    /*每个stream的最大发buffer*/
 			rc = parse_uint_val(NULL, optarg, &v);
 			if (rc < 0)
 				rte_exit(EXIT_FAILURE, "%s: invalid value: %s "
@@ -893,6 +915,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					__func__, optarg, opt);
 			ctx_prm->max_stream_sbufs = v;
 		} else if (opt == OPT_SHORT_STREAMS) {
+		    /*支持的最大stream数*/
 			rc = parse_uint_val(NULL, optarg, &v);
 			if (rc < 0)
 				rte_exit(EXIT_FAILURE, "%s: invalid value: %s "
@@ -900,6 +923,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					__func__, optarg, opt);
 			ctx_prm->max_streams = v;
 		} else if (opt == OPT_SHORT_VERBOSE) {
+		    /*指定log verbose程度*/
 			rc = parse_uint_val(NULL, optarg, &v);
 			if (rc < 0)
 				rte_exit(EXIT_FAILURE, "%s: invalid value: %s "
@@ -907,9 +931,11 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					__func__, optarg, opt);
 			verbose = (v > VERBOSE_NUM) ? VERBOSE_NUM : v;
 		} else if (opt == OPT_SHORT_BECFG) {
+		    /*backend对应的配置文件*/
 			snprintf(becfg_fname, PATH_MAX, "%s",
 				optarg);
 		} else if (opt == OPT_SHORT_FECFG) {
+		    /*frontend对应的配置文件*/
 			snprintf(fecfg_fname, PATH_MAX, "%s",
 				optarg);
 		} else if (opt == OPT_SHORT_UDP) {
@@ -922,6 +948,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 			listen = 1;
 			cfg->server = 1;//指明服务端
 		} else if (opt == OPT_SHORT_HASH) {
+		    /*指明hash算法*/
 			ctx_prm->hash_alg = parse_hash_alg(optarg);
 			if (ctx_prm->hash_alg >= TLE_HASH_NUM) {
 				rte_exit(EXIT_FAILURE,
@@ -930,6 +957,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					__func__, optarg, opt);
 			}
 		} else if (opt == OPT_SHORT_SEC_KEY) {
+		    /*计算hashcode用的secret_key*/
 			n = strlen(optarg);
 			if (n != sizeof(ctx_prm->secret_key)) {
 				rte_exit(EXIT_FAILURE,
@@ -962,6 +990,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 					"from \'%s\', error code: %d(%s)\n",
 					__func__, optarg, rc, strerror(-rc));
 		} else {
+		    /*遇到不认识的选项*/
 			rte_exit(EXIT_FAILURE,
 				"%s: unknown option: \'%c\'\n",
 				__func__, opt);
@@ -969,19 +998,23 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 	}
 
 	if (!udp && !tcp)
+	    /*tcp/udp未指明*/
 		rte_exit(EXIT_FAILURE, "%s: either UDP or TCP option has to be "
 			"provided\n", __func__);
 
 	if (udp && tcp)
+	    /*同时指明了tcp & udp*/
 		rte_exit(EXIT_FAILURE, "%s: both UDP and TCP options are not "
 			"allowed\n", __func__);
 
 	if (udp && listen)
+	    /*listen情况下不支持udp*/
 		rte_exit(EXIT_FAILURE,
 			"%s: listen mode cannot be opened with UDP\n",
 			__func__);
 
 	if (udp && cfg->arp)
+	    /*udp模式下当前不支持arp响应*/
 		rte_exit(EXIT_FAILURE,
 			"%s: arp cannot be enabled with UDP\n",
 			__func__);
@@ -990,15 +1023,21 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 	argc -= optind;
 	argv += optind;
 
+	/*按下来解析n个port相关的配置，配置格式：
+	 * port=<uint>,lcore=<uint>[-<uint>],[lcore=<uint>[-<uint>],]\
+   [rx_offload=<uint>,tx_offload=<uint>,mtu=<uint>,ipv4=<ipv4>,ipv6=<ipv6>]
+     */
 	/* allocate memory for number of ports defined */
-	n = (uint32_t)argc;
+	n = (uint32_t)argc;/*用户指定的port配置条目数，一条一个port，共n个port*/
 	cfg->prt = rte_zmalloc(NULL, sizeof(struct netbe_port) * n,
 		RTE_CACHE_LINE_SIZE);
 	cfg->prt_num = n;
 
+	/*通过配置参数初始化各port*/
 	rc = 0;
 	for (i = 0; i != n; i++) {
-		rc = parse_netbe_arg(cfg->prt + i, argv[i], &cpuset);
+	    /*解析port配置，并填充cfg->port+i*/
+		rc = parse_netbe_arg(cfg->prt + i, argv[i], &cpuset/*出参，记录所有port的cpuset全集合*/);
 		if (rc != 0) {
 			RTE_LOG(ERR, USER1,
 				"%s: processing of \"%s\" failed with error "
@@ -1011,6 +1050,7 @@ parse_app_options(int argc, char **argv, struct netbe_cfg *cfg,
 	}
 
 	/* count the number of CPU defined in ports */
+	/*ports共使用了多少个cpu,每个cpu申请一个netbe_lcore*/
 	for (i = 0, nc = 0; i < RTE_MAX_LCORE; i++)
 		nc += CPU_ISSET(i, &cpuset);
 

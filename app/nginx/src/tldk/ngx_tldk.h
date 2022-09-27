@@ -125,13 +125,18 @@ struct tldk_dev {
 	struct tle_dev *dev;
 	struct tldk_dev_conf cf;
 	struct {
-		uint64_t in;//接收的包数
-		uint64_t up;//正常处理的报文数
-		uint64_t drop;//丢掉的包数
+	    //接收的包数
+		uint64_t in;
+		//正常处理的报文数
+		uint64_t up;
+		//丢掉的包数
+		uint64_t drop;
 	} rx_stat;
 	struct {
 		uint64_t down;
+		/*tx报文统计*/
 		uint64_t out;
+		/*tx报文drop统计*/
 		uint64_t drop;
 	} tx_stat;
 	struct pkt_buf tx_buf;

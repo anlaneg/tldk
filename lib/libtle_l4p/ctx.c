@@ -87,6 +87,7 @@ tle_ctx_create(const struct tle_ctx_param *ctx_prm)
 		return NULL;
 	}
 
+	/*申请context*/
 	sz = sizeof(*ctx);
 	ctx = rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE,
 		ctx_prm->socket_id);
@@ -103,7 +104,7 @@ tle_ctx_create(const struct tle_ctx_param *ctx_prm)
 
 	ctx->prm = *ctx_prm;
 
-	//依据不同协议进行初始化(例如tcp,udp)
+	//依据不同协议进行初始化ctx(例如tcp,udp)
 	rc = tle_stream_ops[ctx_prm->proto].init_streams(ctx);
 	if (rc != 0) {
 		UDP_LOG(ERR, "init_streams(ctx=%p, proto=%u) failed "
@@ -164,6 +165,7 @@ init_dev_proto(struct tle_dev *dev, uint32_t idx, int32_t socket_id,
 {
 	size_t sz;
 
+	/*为指定的协议族分配dport*/
 	sz = sizeof(*dev->dp[idx]);
 	dev->dp[idx] = rte_zmalloc_socket(NULL, sz, RTE_CACHE_LINE_SIZE,
 		socket_id);
@@ -185,6 +187,7 @@ find_free_dev(struct tle_ctx *ctx)
 {
 	uint32_t i;
 
+	/*分配一个空闲的tle_dev*/
 	if (ctx->nb_dev < RTE_DIM(ctx->dev)) {
 		for (i = 0; i != RTE_DIM(ctx->dev); i++) {
 			if (ctx->dev[i].ctx != ctx)
@@ -208,6 +211,7 @@ tle_add_dev(struct tle_ctx *ctx, const struct tle_dev_param *dev_prm)
 		return NULL;
 	}
 
+	/*分配一个tle_dev*/
 	dev = find_free_dev(ctx);
 	if (dev == NULL)
 		return NULL;
@@ -215,6 +219,7 @@ tle_add_dev(struct tle_ctx *ctx, const struct tle_dev_param *dev_prm)
 
 	/* device can handle IPv4 traffic */
 	if (dev_prm->local_addr4.s_addr != INADDR_ANY) {
+	    /*设备包含ipv4地址*/
 		rc = init_dev_proto(dev, TLE_V4, ctx->prm.socket_id,
 			&dev_prm->bl4);
 		if (rc == 0)
@@ -314,11 +319,13 @@ tle_del_dev(struct tle_dev *dev)
 	return 0;
 }
 
+/*检查所有dev,如果某个dev上具有此addr,则返回相应在dev*/
 static struct tle_dev *
 find_ipv4_dev(struct tle_ctx *ctx, const struct in_addr *addr)
 {
 	uint32_t i;
 
+	/*遍历所有设备，查找对应addr*/
 	for (i = 0; i != RTE_DIM(ctx->dev); i++) {
 		if (ctx->dev[i].prm.local_addr4.s_addr == addr->s_addr &&
 				ctx->dev[i].dp[TLE_V4] != NULL)
@@ -351,8 +358,9 @@ stream_fill_dev(struct tle_ctx *ctx, struct tle_stream *s,
 	struct tle_pbm *pbm;
 	const struct sockaddr_in *lin4;
 	const struct sockaddr_in6 *lin6;
-	uint32_t i, p, sp, t;
+	uint32_t i, p/*port情况*/, sp, t;
 
+	/*取ip,port*/
 	if (addr->sa_family == AF_INET) {
 		lin4 = (const struct sockaddr_in *)addr;
 		t = TLE_V4;
@@ -364,10 +372,12 @@ stream_fill_dev(struct tle_ctx *ctx, struct tle_stream *s,
 	} else
 		return EINVAL;
 
+	/*port转主机序*/
 	p = ntohs(p);
 
 	/* if local address is not wildcard, find device it belongs to. */
 	if (t == TLE_V4 && lin4->sin_addr.s_addr != INADDR_ANY) {
+	    /*获取addr对应的dev*/
 		dev = find_ipv4_dev(ctx, &lin4->sin_addr);
 		if (dev == NULL)
 			return ENODEV;
@@ -380,6 +390,7 @@ stream_fill_dev(struct tle_ctx *ctx, struct tle_stream *s,
 		dev = NULL;
 
 	if (dev != NULL)
+	    /*取此dev对应的tle_pbm*/
 		pbm = &dev->dp[t]->use;
 	else
 		pbm = &ctx->use[t];
@@ -390,6 +401,7 @@ stream_fill_dev(struct tle_ctx *ctx, struct tle_stream *s,
 		if (p == 0 && pbm->blk > LPORT_START_BLK)
 			p = tle_pbm_find_range(pbm, LPORT_START_BLK, pbm->blk);
 	} else if (tle_pbm_check(pbm, p) != 0)
+	    /*指明此port已被占用*/
 		return EEXIST;
 
 	if (p == 0)
@@ -403,14 +415,19 @@ stream_fill_dev(struct tle_ctx *ctx, struct tle_stream *s,
 
 	/* mark port as in-use */
 
-	tle_pbm_set(&ctx->use[t], p);
+	tle_pbm_set(&ctx->use[t], p);/*标记此port已占用*/
 	if (dev != NULL) {
+	    /*有具体的dev,则在此dev上进行占用*/
 		tle_pbm_set(pbm, p);
+		/*记录监听的port*/
 		dev->dp[t]->streams[sp] = s;
 	} else {
+	    /*没有具体dev,遍历每个dev,设置给每个dev设置对应的stream*/
 		for (i = 0; i != RTE_DIM(ctx->dev); i++) {
 			if (ctx->dev[i].dp[t] != NULL) {
+			    /*占用port*/
 				tle_pbm_set(&ctx->dev[i].dp[t]->use, p);
+				/*记录监听的port*/
 				ctx->dev[i].dp[t]->streams[sp] = s;
 			}
 		}
@@ -486,7 +503,7 @@ fill_ipv6_am(const struct sockaddr_in6 *in, rte_xmm_t *addr, rte_xmm_t *mask)
 
 int
 stream_fill_ctx(struct tle_ctx *ctx, struct tle_stream *s,
-	const struct sockaddr *laddr, const struct sockaddr *raddr)
+	const struct sockaddr *laddr/*本端地址*/, const struct sockaddr *raddr/*远端地址*/)
 {
 	const struct sockaddr_in *rin;
 	int32_t rc;
@@ -494,7 +511,7 @@ stream_fill_ctx(struct tle_ctx *ctx, struct tle_stream *s,
 	/* setup ports and port mask fields (except dst port). */
 	rin = (const struct sockaddr_in *)raddr;
 	s->port.src = rin->sin_port;
-	s->pmsk.src = (s->port.src == 0) ? 0 : UINT16_MAX;
+	s->pmsk.src = (s->port.src == 0) ? 0 : UINT16_MAX;/*如果port为0，则掩码为0，否则全掩*/
 	s->pmsk.dst = UINT16_MAX;
 
 	/* setup src and dst addresses. */

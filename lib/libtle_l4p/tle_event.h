@@ -40,12 +40,13 @@ enum tle_ev_state {
 
 struct tle_event {
 	TAILQ_ENTRY(tle_event) ql;
-	struct tle_evq *head;
+	struct tle_evq *head;/*指向tle_evq*/
 	const void *data;
 	enum tle_ev_state state;
 } __rte_cache_aligned;
 
 struct tle_evq {
+    /*保护此tle_evq*/
 	rte_spinlock_t lock;
 	/*可用event总数*/
 	uint32_t nb_events;
@@ -53,7 +54,8 @@ struct tle_evq {
 	/*空闲event总数*/
 	uint32_t nb_free;
 	TAILQ_HEAD(, tle_event) armed;
-	TAILQ_HEAD(, tle_event) free;
+	TAILQ_HEAD(, tle_event) free;/*空闲链表*/
+	/*其大小由tle_evq_param->max_events指定*/
 	struct tle_event events[0];
 };
 

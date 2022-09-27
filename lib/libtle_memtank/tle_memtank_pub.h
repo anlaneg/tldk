@@ -38,11 +38,13 @@ struct tle_memtank {
 } __rte_cache_aligned;
 
 
+/*将src中num个元素copy到dst*/
 static inline void
 _copy_objs(void *dst[], void * const src[], uint32_t num)
 {
 	uint32_t i, n;
 
+	/*num以4对齐*/
 	n = RTE_ALIGN_FLOOR(num, 4);
 
 	for (i = 0; i != n; i += 4) {
@@ -75,6 +77,7 @@ _get_free(struct tle_memtank *t, void *obj[], uint32_t num)
 	len = t->nb_free;
 	n = RTE_MIN(num, len);
 	len -= n;
+	/*将t->free+len开头的n个元素填充到obj中*/
 	_copy_objs(obj, t->free + len, n);
 	t->nb_free = len;
 

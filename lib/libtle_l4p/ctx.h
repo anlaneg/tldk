@@ -32,11 +32,11 @@ extern "C" {
 struct tle_dport {
 	struct tle_pbm use; /* ports in use. */
 	//监听表（其内容可以为tcp监听表，udp监听表，例如：tle_tcp_stream）
-	struct tle_stream *streams[MAX_PORT_NUM]; /* port to stream. */
+	struct tle_stream *streams[MAX_PORT_NUM/*主机序port*/]; /* port to stream. */
 };
 
 struct tle_dev {
-	struct tle_ctx *ctx;
+	struct tle_ctx *ctx;/*指向其对应的context,如果为空，则此结构未分配*/
 	struct {
 		/* used by FE. */
 		uint64_t ol_flags[TLE_VNUM];
@@ -48,6 +48,7 @@ struct tle_dev {
 	} tx;
 	struct tle_dev_param prm; /* copy of device parameters. */
 
+	/*按ipv4/ipv6进行划分的目的port*/
 	struct tle_dport *dp[TLE_VNUM]; /* device L4 ports */
 };
 
@@ -65,7 +66,9 @@ struct tle_ctx {
 	} streams;
 
 	rte_spinlock_t dev_lock;
+	/*dev数据有效长度*/
 	uint32_t nb_dev;
+	/*port bitmap记录哪些port已被占用*/
 	struct tle_pbm use[TLE_VNUM]; /* all ports in use. */
 	struct tle_dev dev[RTE_MAX_ETHPORTS];
 };

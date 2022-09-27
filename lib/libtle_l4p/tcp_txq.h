@@ -100,6 +100,7 @@ txs_enqueue(struct tle_ctx *ctx, struct tle_tcp_stream *s)
 	uint32_t n;
 
 	if (rte_atomic32_add_return(&s->tx.arm, 1) == 1) {
+	    /*将stream添加到tsq队列*/
 		r = CTX_TCP_TSQ(ctx);
 		n = _rte_ring_enqueue_burst(r, (void * const *)&s, 1);
 		RTE_VERIFY(n == 1);
@@ -111,6 +112,7 @@ txs_dequeue_bulk(struct tle_ctx *ctx, struct tle_tcp_stream *s[], uint32_t num)
 {
 	struct rte_ring *r;
 
+	/*将stream出队*/
 	r = CTX_TCP_TSQ(ctx);
 	return _rte_ring_dequeue_burst(r, (void **)s, num);
 }

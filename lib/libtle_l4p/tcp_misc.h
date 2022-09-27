@@ -76,7 +76,9 @@ extern "C" {
 union typflg {
 	uint16_t raw;
 	struct {
+	    /*报文类型ipv4/ipv6*/
 		uint8_t type;  /* TLE_V4/TLE_V6 */
+		/*报文tcp flags*/
 		uint8_t flags; /* TCP header flags */
 	};
 };
@@ -84,9 +86,11 @@ union typflg {
 union pkt_info {
 	rte_xmm_t raw;
 	struct {
-		union typflg tf;//tcp flags
+	    //tcp flags
+		union typflg tf;
 		uint16_t csf;  /* checksum flags */
-		union l4_ports port;//源目的port
+		//源目的port
+		union l4_ports port;
 		union {
 			union ipv4_addrs addr4;
 			const union ipv6_addrs *addr6;
@@ -427,8 +431,10 @@ get_pkt_type(const struct rte_mbuf *m)
 	v = m->packet_type &
 		(RTE_PTYPE_L3_IPV4 | RTE_PTYPE_L3_IPV6 | RTE_PTYPE_L4_MASK);
 	if (v == (RTE_PTYPE_L3_IPV4 | RTE_PTYPE_L4_TCP))
+	    /*ipv4+tcp情况*/
 		return TLE_V4;
 	else if (v == (RTE_PTYPE_L3_IPV6 | RTE_PTYPE_L4_TCP))
+	    /*ipv6+tcp情况*/
 		return TLE_V6;
 	else
 		return TLE_VNUM;
@@ -469,10 +475,13 @@ get_pkt_info(const struct rte_mbuf *m, union pkt_info *pi, union seg_info *si)
 	//取源目的port
 	prt = (const union l4_ports *)
 		((uintptr_t)tcph + offsetof(struct rte_tcp_hdr, src_port));
-	pi->tf.flags = tcph->tcp_flags;//取tcp标记位
-	pi->tf.type = type;//ipv4或者ipv6类型
+	//取tcp标记位
+	pi->tf.flags = tcph->tcp_flags;
+	//ipv4或者ipv6类型
+	pi->tf.type = type;
 	pi->csf = m->ol_flags & (PKT_RX_IP_CKSUM_MASK | PKT_RX_L4_CKSUM_MASK);
-	pi->port.raw = prt->raw;//取源目的port
+	//取源目的port
+	pi->port.raw = prt->raw;
 
 	get_seg_info(tcph, si);
 }

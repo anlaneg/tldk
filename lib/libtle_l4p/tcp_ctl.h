@@ -83,8 +83,10 @@ tcp_stream_acquire(struct tle_tcp_stream *s)
 	int32_t v;
 
 	if ((s->flags & TLE_CTX_FLAG_ST) == 0)
+	    /*非单线程情况，增加引用计数*/
 		return rwl_acquire(&s->use);
 
+	/*引用计数增加：v+1*/
 	v = rte_atomic32_read(&s->use) + 1;
 	if (v > 0)
 		rte_atomic32_set(&s->use, v);
@@ -201,7 +203,10 @@ tcp_stream_get(struct tle_ctx *ctx, uint32_t flag)
 	ts = CTX_TCP_STREAMS(ctx);
 	
 	/* check TX pending list */
+	/*分配一个空闲的tle_stream*/
 	s = get_stream(ctx);
+
+	/*将tle_stream转为tle_tcp_stream*/
 	cs = TCP_STREAM(s);
 	if (s != NULL) {
 		if (TCP_STREAM_TX_FINISHED(cs))

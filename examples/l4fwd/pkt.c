@@ -71,10 +71,11 @@ adjust_ipv4_pktlen(struct rte_mbuf *m, uint32_t l2_len)
 	uint32_t plen, trim;
 	const struct rte_ipv4_hdr *iph;
 
+	/*取ip头*/
 	iph = rte_pktmbuf_mtod_offset(m, const struct rte_ipv4_hdr *, l2_len);
-	plen = rte_be_to_cpu_16(iph->total_length) + l2_len;
+	plen = rte_be_to_cpu_16(iph->total_length) + l2_len;/*ip报文+l2头长度*/
 	if (plen < m->pkt_len) {
-		trim = m->pkt_len - plen;
+		trim = m->pkt_len - plen;/*要移除的长度*/
 		rte_pktmbuf_trim(m, trim);
 	}
 }
@@ -231,6 +232,7 @@ fill_ipv6_hdr_len(struct rte_mbuf *m, uint32_t l2, uint32_t fproto,
 	adjust_ipv6_pktlen(m, l2);
 }
 
+/*将收到的arp报文挂接在arp buffer上*/
 static inline struct rte_mbuf *
 handle_arp(struct rte_mbuf *m, struct netbe_lcore *lc, dpdk_port_t port,
 	uint32_t l2len)
@@ -255,7 +257,7 @@ handle_arp(struct rte_mbuf *m, struct netbe_lcore *lc, dpdk_port_t port,
 
 	abuf->pkt[abuf->num++] = m;
 
-	return NULL;
+	return NULL;/*已挂接，返回NULL*/
 }
 
 static inline struct rte_mbuf *
@@ -271,6 +273,7 @@ fill_eth_tcp_arp_hdr_len(struct rte_mbuf *m, struct netbe_lcore *lc,
 	/* check that first segment is at least 54B long. */
 	if (dlen < sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) +
 			sizeof(struct rte_tcp_hdr)) {
+	    /*报文长度小于tcp头*/
 		m->packet_type = RTE_PTYPE_UNKNOWN;
 		return m;
 	}
@@ -283,6 +286,7 @@ fill_eth_tcp_arp_hdr_len(struct rte_mbuf *m, struct netbe_lcore *lc,
 		l2_len += sizeof(struct rte_vlan_hdr);
 
 	if (etp == rte_be_to_cpu_16(RTE_ETHER_TYPE_ARP))
+	    /*arp报文处理*/
 		return handle_arp(m, lc, port, l2_len);
 
 	if (etp == rte_be_to_cpu_16(RTE_ETHER_TYPE_IPV4)) {
@@ -321,6 +325,7 @@ fill_eth_tcp_hdr_len(struct rte_mbuf *m)
 	/* check that first segment is at least 54B long. */
 	if (dlen < sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) +
 			sizeof(struct rte_tcp_hdr)) {
+	    /*数据报长度不足tcp头，丢包*/
 		m->packet_type = RTE_PTYPE_UNKNOWN;
 		return;
 	}
@@ -828,12 +833,13 @@ typen_tcp_arp_rx_callback(dpdk_port_t port, uint16_t queue,
 
 		NETBE_PKT_DUMP(pkt[j]);
 		pkt[j] = fill_eth_tcp_arp_hdr_len(pkt[j], lc, port);
-		x += (pkt[j] == NULL);
+		x += (pkt[j] == NULL);/*实际有效的packet数目*/
 	}
 
 	if (x == 0)
 		return nb_pkts;
 
+	/*部分mbuf自table中被移除了，这里重排，保证无空隙*/
 	return compress_pkt_list(pkt, nb_pkts, x);
 }
 
@@ -1004,10 +1010,13 @@ setup_rx_cb(const struct netbe_port *uprt, struct netbe_lcore *lc,
 	smask = get_ptypes(uprt);
 
 	if (lc->proto == TLE_PROTO_TCP) {
+	    /*tcp协议处理*/
 		if (arp != 0) {
+		    /*arp使能情况下的tcp处理*/
 			ptype2cb = tcp_arp_ptype2cb;
 			n = RTE_DIM(tcp_arp_ptype2cb);
 		} else {
+		    /*无arp使能的tcp rx回调*/
 			ptype2cb = tcp_ptype2cb;
 			n = RTE_DIM(tcp_ptype2cb);
 		}
@@ -1023,6 +1032,7 @@ setup_rx_cb(const struct netbe_port *uprt, struct netbe_lcore *lc,
 
 	for (i = 0; i != n; i++) {
 		if ((smask & ptype2cb[i].mask) == ptype2cb[i].mask) {
+		    /*添加rx回调*/
 			cb = rte_eth_add_rx_callback(uprt->id, qid,
 				ptype2cb[i].fn, lc);
 			rc = -rte_errno;

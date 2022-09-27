@@ -53,16 +53,17 @@ rx_check_stream(const struct tle_tcp_stream *s, const union pkt_info *pi)
 	return rc;
 }
 
-//查找pi对应的tcp目的端口
+//查询监听表
 static inline struct tle_tcp_stream *
 rx_obtain_listen_stream(const struct tle_dev *dev, const union pkt_info *pi,
-	uint32_t type)
+	uint32_t type/*ipv4/ipv6报文类型*/)
 {
 	struct tle_tcp_stream *s;
 
 	//查此目的地址对应的监听表,如果s不存在，则目的不可达
 	s = (struct tle_tcp_stream *)dev->dp[type]->streams[pi->port.dst];
 	if (s == NULL || tcp_stream_acquire(s) < 0)
+	    /*查询监听表失败*/
 		return NULL;
 
 	/* check that we have a proper stream. */
@@ -198,9 +199,10 @@ get_ip_pid(struct tle_dev *dev, uint32_t num, uint32_t type, uint32_t st)
 	}
 }
 
+/*填充tcp头部*/
 static inline void
 fill_tcph(struct rte_tcp_hdr *l4h, const struct tcb *tcb, union l4_ports port,
-	uint32_t seq, uint8_t hlen, uint8_t flags)
+	uint32_t seq, uint8_t hlen/*头部长度*/, uint8_t flags)
 {
 	uint16_t wnd;
 
@@ -208,49 +210,58 @@ fill_tcph(struct rte_tcp_hdr *l4h, const struct tcb *tcb, union l4_ports port,
 	l4h->src_port = port.dst;
 	l4h->dst_port = port.src;
 
-	//窗品大小，如果有syn，则取对端窗口及本端最大窗口最大值之间的最小值
+	//窗口大小，如果有syn，则取对端窗口及本端最大窗口最大值之间的最小值
 	wnd = (flags & TCP_FLAG_SYN) ?
 		RTE_MIN(tcb->rcv.wnd, (uint32_t)UINT16_MAX) :
 		tcb->rcv.wnd >> tcb->rcv.wscale;//使用协商的窗口大小
 
 	/* ??? use sse shuffle to hton all remaining 16 bytes at once. ??? */
-	l4h->sent_seq = rte_cpu_to_be_32(seq);//设置本端seq
-	l4h->recv_ack = rte_cpu_to_be_32(tcb->rcv.nxt);//确认对端的seq(本端ack)
+	//设置本端seq
+	l4h->sent_seq = rte_cpu_to_be_32(seq);
+	//确认对端的seq(本端ack)
+	l4h->recv_ack = rte_cpu_to_be_32(tcb->rcv.nxt);
+	/*data offset长度设置*/
 	l4h->data_off = hlen / TCP_DATA_ALIGN << TCP_DATA_OFFSET;
-	l4h->tcp_flags = flags;//设置flags
-	l4h->rx_win = rte_cpu_to_be_16(wnd);//设置窗口大小
+	//设置flags
+	l4h->tcp_flags = flags;
+	//设置窗口大小
+	l4h->rx_win = rte_cpu_to_be_16(wnd);
 	l4h->cksum = 0;
 	l4h->tcp_urp = 0;
 
 	if (flags & TCP_FLAG_SYN)
-		//设置syn的选项
+		/*设置syn的选项*/
 		fill_syn_opts(l4h + 1, &tcb->so);
 	else if ((flags & TCP_FLAG_RST) == 0 && tcb->so.ts.raw != 0)
-		//非rst报文，且ts无值
+		/*非rst报文，且ts有值情况*/
 		fill_tms_opts(l4h + 1, tcb->snd.ts, tcb->rcv.ts);
 }
 
 static inline int
 tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
-	const struct tle_dest *dst, uint64_t ol_flags,//offload标记
-	union l4_ports port, uint32_t seq, uint32_t flags,//seq,本端要发送的序号，flags要发送的tcp flags
-	uint32_t pid, uint32_t swcsm)//ip层报文id号，swcsm软件是否需要计算checksum
+	const struct tle_dest *dst, uint64_t ol_flags/*offload标记*/,
+	union l4_ports port/*源目的端口情况*/, uint32_t seq/*seq,本端要发送的序号*/, uint32_t flags/*flags要发送的tcp flags*/,
+	uint32_t pid/*ip层报文id号*/, uint32_t swcsm/*swcsm软件是否需要计算checksum*/)
 {
 	uint32_t l4, len, plen;
 	struct rte_tcp_hdr *l4h;
 	char *l2h;
 
+	/*l2,l3报文长度*/
 	len = dst->l2_len + dst->l3_len;
 	plen = m->pkt_len;
 
 	if (flags & TCP_FLAG_SYN)
+	    /*syn报文*/
 		l4 = sizeof(*l4h) + TCP_TX_OPT_LEN_MAX;
 	else if ((flags & TCP_FLAG_RST) == 0 && s->tcb.rcv.ts != 0)
+	    /*rst报文且ts非零*/
 		l4 = sizeof(*l4h) + TCP_TX_OPT_LEN_TMS;
 	else
 		l4 = sizeof(*l4h);
 
 	/* adjust mbuf to put L2/L3/L4 headers into it. */
+	/*调整mbuf位置，以便容许存放l2,l3,l4头*/
 	l2h = rte_pktmbuf_prepend(m, len + l4);
 	if (l2h == NULL)
 		return -EINVAL;
@@ -260,8 +271,10 @@ tcp_fill_mbuf(struct rte_mbuf *m, const struct tle_tcp_stream *s,
 	rte_memcpy(l2h, dst->hdr, len);//自dst中copy l2与l3的头部(常用字段，非全部字段）
 
 	/* setup TCP header & options */
+	/*l4h指向4层起始位置*/
 	l4h = (struct rte_tcp_hdr *)(l2h + len);
-	fill_tcph(l4h, &s->tcb, port, seq, l4, flags);//设置tcp头部及选项
+	//设置tcp头部及选项
+	fill_tcph(l4h, &s->tcb, port, seq, l4, flags);
 
 	/* setup mbuf TX offload related fields. */
 	m->tx_offload = _mbuf_tx_offload(dst->l2_len, dst->l3_len, l4, 0, 0, 0);
@@ -537,11 +550,14 @@ free_una_data(struct tle_tcp_stream *s, uint32_t len)
 	}
 }
 
+/*计算mss*/
 static inline uint16_t
 calc_smss(uint16_t mss, const struct tle_dest *dst)
 {
 	uint16_t n;
 
+	/*mtu减去l2长度，减去l3长度，减去tcphdr,减去tcp选项*/
+	/*例如按1514,减去14(l2长度），减去20（ipv4 l3长度），减去20 (tcphdr l4长度），减去(option)*/
 	n = dst->mtu - dst->l2_len - dst->l3_len - TCP_TX_HDR_DACK;
 	mss = RTE_MIN(n, mss);
 	return mss;
@@ -576,7 +592,7 @@ send_pkt(struct tle_tcp_stream *s, struct tle_dev *dev, struct rte_mbuf *m)
 		return -ENOBUFS;
 
 	/* enqueue pkt for TX. */
-	//报文进设备发队列
+	//报文进设备待发送队列
 	nb = 1;
 	n = tle_dring_mp_enqueue(&dev->tx.dr, (const void * const*)&m, 1,
 		&drb, &nb);
@@ -650,9 +666,9 @@ send_ack(struct tle_tcp_stream *s, uint32_t tms, uint32_t flags)
 	return 0;
 }
 
-//服务器端响应syn报文，回复syn+ack
+//服务器端收到syn报文，检查通过，回复syn+ack
 static int
-sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
+sync_ack(struct tle_tcp_stream *s/*对应的stream*/, const union pkt_info *pi/*报文信息*/,
 	const union seg_info *si, uint32_t ts, struct rte_mbuf *m)
 {
 	uint16_t len;
@@ -687,7 +703,8 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	if (s->tcb.so.ts.val == 0)
 		s->tcb.so.wscale = 0;
 
-	s->tcb.rcv.nxt = si->seq + 1;//syn报文序号加1
+	//syn报文序号加1
+	s->tcb.rcv.nxt = si->seq + 1;
 	//生成一个seq（由于syn flood问题，需要考虑时间，需要考虑mss)
 	seq = sync_gen_seq(pi, s->tcb.rcv.nxt, ts, s->tcb.so.mss,
 				s->s.ctx->prm.hash_alg,
@@ -696,7 +713,8 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	s->tcb.so.ts.val = sync_gen_ts(ts, s->tcb.so.wscale);
 	s->tcb.so.wscale = (s->tcb.so.wscale == TCP_WSCALE_NONE) ?
 		TCP_WSCALE_NONE : TCP_WSCALE_DEFAULT;
-	s->tcb.so.mss = calc_smss(dst.mtu, &dst);//依据接口mtu生成mss
+	//依据接口mtu生成mss
+	s->tcb.so.mss = calc_smss(dst.mtu, &dst);
 
 	/* reset mbuf's data contents. */
 	len = m->l2_len + m->l3_len + m->l4_len;
@@ -704,7 +722,8 @@ sync_ack(struct tle_tcp_stream *s, const union pkt_info *pi,
 	if (rte_pktmbuf_adj(m, len) == NULL)
 		return -EINVAL;
 
-	dev = dst.dev;//获取出接口对应设备
+	//获取出接口对应设备
+	dev = dst.dev;
 	//取dev设备上的ip层id
 	pid = get_ip_pid(dev, 1, type, (s->flags & TLE_CTX_FLAG_ST) != 0);
 
@@ -861,6 +880,7 @@ stream_term(struct tle_tcp_stream *s)
 		s->err.cb.func(s->err.cb.data, &s->s);
 }
 
+/*利用src ip做为目标，查路由填充s->tx.dst*/
 static inline int
 stream_fill_dest(struct tle_tcp_stream *s)
 {
@@ -1002,6 +1022,7 @@ rx_ack_listen(struct tle_tcp_stream *s, struct stbl *st,
 		ts = &cs->s;
 		if (_rte_ring_enqueue_burst(s->rx.q,
 				(void * const *)&ts, 1) == 1) {
+		    /*向rx方向添加ts*/
 			*csp = cs;
 			return 0;
 		}
@@ -1810,7 +1831,7 @@ rx_new_stream(struct tle_tcp_stream *s, uint32_t ts,
 	return 0;
 }
 
-//处理syn之后的其它类型报文
+//处理除syn之外的其它类型报文
 static inline uint32_t
 rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 	const union pkt_info pi[], union seg_info si[],
@@ -1900,8 +1921,8 @@ rx_postsyn(struct tle_dev *dev, struct stbl *st, uint32_t type, uint32_t ts,
 
 //处理syn报文
 static inline uint32_t
-rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
-	const union pkt_info pi[], const union seg_info si[],
+rx_syn(struct tle_dev *dev/*入接口设备*/, uint32_t type/*ipv4/ipv6类型*/, uint32_t ts/*报文收到时的时间*/,
+	const union pkt_info pi[]/*报文信息*/, const union seg_info si[],
 	struct rte_mbuf *mb[], struct rte_mbuf *rp[], int32_t rc[],
 	uint32_t num)
 {
@@ -1909,10 +1930,12 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 	uint32_t i, k;
 	int32_t ret;
 
-	//从pi开始的这些包，一共有num个属于同一条流，因此仅需要查询一次
+	//pi这些包，一共有num个属于同一条流，因此仅需要查询一次
+
+	//收到syn报，查询监听表
 	s = rx_obtain_listen_stream(dev, &pi[0], type);
 	if (s == NULL) {
-		//查询不到listen表，则目的不可达（需要回复rst)
+		//查询不到监听表，则查无实体（需要回复rst)
 		for (i = 0; i != num; i++) {
 			rc[i] = ENOENT;
 			rp[i] = mb[i];
@@ -1920,13 +1943,13 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
 		return 0;
 	}
 
+	/*查询监听表成功，找到此报文对应的stream s*/
 	k = 0;
 	for (i = 0; i != num; i++) {
 
 		/* check that this remote is allowed to connect */
 		//目的端口是对的，这里检查是否为合适的目的ip(服务器端在监听时
-		//可以选择监听0.0.0.0做为目的ip，也可以监听127.0.0.1或者某个其它ip
-		//这里有个问题，能否监听一个ip段？（好像不能，未确认）
+		//可以选择监听0.0.0.0做为目的ip，也可以监听127.0.0.1或者某个其它一个或多个ip
 		if (rx_check_stream(s, &pi[i]) != 0)
 			ret = -ENOENT;//地址未绑定情况
 		else
@@ -1949,12 +1972,12 @@ rx_syn(struct tle_dev *dev, uint32_t type, uint32_t ts,
  * tcp报文批量处理
  * @pkt 收到的报
  * @rp 出参，剩余的报（无法处理的包，或者要丢掉的包）
- * @rc 剩余包对应的出接口
+ * @rc 剩余待释放的包原因
  * @num 一共有多少个待处理的包
  */
 uint16_t
-tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
-	struct rte_mbuf *rp[], int32_t rc[], uint16_t num)
+tle_tcp_rx_bulk(struct tle_dev *dev/*入接口设备*/, struct rte_mbuf *pkt[],
+	struct rte_mbuf *rp[], int32_t rc[], uint16_t num/*pkt数组数目*/)
 {
 	struct stbl *st;
 	struct tle_ctx *ctx;
@@ -1967,8 +1990,11 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 	} stu;
 
 	ctx = dev->ctx;
+
 	//将当前时间换算成ms
 	ts = tcp_get_tms(ctx->cycles_ms_shift);
+
+	/*取tcp stream*/
 	st = CTX_TCP_STLB(ctx);
 	mt = ((ctx->prm.flags & TLE_CTX_FLAG_ST) == 0);
 
@@ -1991,6 +2017,7 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 	if (stu.t[TLE_V6] != 0)
 		stbl_lock(st, TLE_V6);
 
+	/*遍历收到的每个报文*/
 	k = 0;
 	for (i = 0; i != num; i += j) {
 
@@ -1998,20 +2025,24 @@ tle_tcp_rx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[],
 
 		/*basic checks for incoming packet */
 		if (t >= TLE_VNUM || pi[i].csf != 0 || dev->dp[t] == NULL) {
+		    /*t类型无效/checksum有误/不认识的协议，均跳过，记rc[k]为无效参数*/
 			rc[k] = EINVAL;
 			rp[k] = pkt[i];
 			j = 1;
-			k++;//checksum 有误的报，或者不认识的协议报文，均跳过
+			k++;
 		/* process input SYN packets */
 		} else if (pi[i].tf.flags == TCP_FLAG_SYN) {
-			//跳过同一条流的报文（需要紧挨着），（i到j之间的这些报文属于同一条stream,只需要查询一次）
+		    /* 收到syn标记报文，跳过同一条流的报文（需要紧挨着），
+		     *（i到j之间的这些报文属于同一条stream,只需要查询一次）
+		     * j为待跳过报文数
+		     */
 			j = pkt_info_bulk_syneq(pi + i, num - i);
-			//处理第i个包,负责回复syn+ack
+			//收到的是syn包，检查情况，回复syn+ack/rst
 			n = rx_syn(dev, t, ts, pi + i, si + i, pkt + i,
 				rp + k, rc + k, j);
 			k += j - n;
 		} else {
-			//跳过同一条流的报文，同一条流只需要查询一次stream
+			//处理非syn包
 			j = pkt_info_bulk_eq(pi + i, num - i);
 			n = rx_postsyn(dev, st, t, ts, pi + i, si + i, pkt + i,
 				rp + k, rc + k, j);
@@ -2066,6 +2097,7 @@ tle_tcp_tx_bulk(struct tle_dev *dev, struct rte_mbuf *pkt[], uint16_t num)
 
 	/* extract packets from device TX queue. */
 
+	/*自dev->tx.dr出队一组pkt*/
 	k = num;
 	n = tle_dring_sc_dequeue(&dev->tx.dr, (const void **)(uintptr_t)pkt,
 		num, drb, &k);
@@ -2112,8 +2144,10 @@ stream_fill_addr(struct tle_tcp_stream *s, const struct sockaddr *addr)
 	if (s->s.type == TLE_V4) {
 		in4 = (const struct sockaddr_in *)addr;
 		if (in4->sin_addr.s_addr == INADDR_ANY || in4->sin_port == 0)
+		    /*地址不得为0，端口不得为0*/
 			return -EINVAL;
 
+		/*ipv4填充源地址，源port*/
 		s->s.port.src = in4->sin_port;
 		s->s.ipv4.addr.src = in4->sin_addr.s_addr;
 		s->s.ipv4.mask.src = INADDR_NONE;
@@ -2126,6 +2160,7 @@ stream_fill_addr(struct tle_tcp_stream *s, const struct sockaddr *addr)
 				in6->sin6_port == 0)
 			return -EINVAL;
 
+		/*ipv6填充源地址，源port*/
 		s->s.port.src = in6->sin6_port;
 		rte_memcpy(&s->s.ipv6.addr.src, &in6->sin6_addr,
 			sizeof(s->s.ipv6.addr.src));
@@ -2153,6 +2188,7 @@ stream_fill_addr(struct tle_tcp_stream *s, const struct sockaddr *addr)
 	return rc;
 }
 
+/*发送syn包*/
 static inline int
 tx_syn(struct tle_tcp_stream *s, const struct sockaddr *addr)
 {
@@ -2218,9 +2254,11 @@ tle_tcp_stream_connect(struct tle_stream *ts, const struct sockaddr *addr)
 	s = TCP_STREAM(ts);
 	type = s->s.type;
 	if (type >= TLE_VNUM)
+	    /*type检查不合格，返回*/
 		return -EINVAL;
 
 	if (tcp_stream_try_acquire(s) > 0) {
+	    /*由closed状态转syn_sent状态*/
 		rc = rte_atomic16_cmpset(&s->tcb.state, TCP_ST_CLOSED,
 			TCP_ST_SYN_SENT);
 		rc = (rc == 0) ? -EDEADLK : 0;
@@ -2458,6 +2496,7 @@ tle_tcp_stream_send(struct tle_stream *ts, struct rte_mbuf *pkt[], uint16_t num)
 	return k;
 }
 
+/*tcp向外发送数据*/
 ssize_t
 tle_tcp_stream_writev(struct tle_stream *ts, struct rte_mempool *mp,
 	const struct iovec *iov, int iovcnt)
@@ -2470,6 +2509,7 @@ tle_tcp_stream_writev(struct tle_stream *ts, struct rte_mempool *mp,
 	struct iovec iv;
 	struct rte_mbuf *mb[2 * MAX_PKT_BURST];
 
+	/*由ts获得tcp_stream*/
 	s = TCP_STREAM(ts);
 
 	/* mark stream as not closable. */
@@ -2479,6 +2519,7 @@ tle_tcp_stream_writev(struct tle_stream *ts, struct rte_mempool *mp,
 	}
 
 	state = s->tcb.state;
+	/*state不达到指定状态，返回错误*/
 	if (state != TCP_ST_ESTABLISHED && state != TCP_ST_CLOSE_WAIT) {
 		rte_errno = ENOTCONN;
 		tcp_stream_release(s);
@@ -2493,12 +2534,14 @@ tle_tcp_stream_writev(struct tle_stream *ts, struct rte_mempool *mp,
 	slen = rte_pktmbuf_data_room_size(mp);
 	slen = RTE_MIN(slen, s->tcb.snd.mss);
 
+	/*可发送的报文总数*/
 	num = (tsz + slen - 1) / slen;
 	n = rte_ring_free_count(s->tx.q);
 	num = RTE_MIN(num, n);
 	n = RTE_MIN(num, RTE_DIM(mb));
 
 	/* allocate mbufs */
+	/*申请n个mbuf，存入到mb*/
 	if (rte_pktmbuf_alloc_bulk(mp, mb, n) != 0) {
 		rte_errno = ENOMEM;
 		tcp_stream_release(s);
@@ -2511,6 +2554,7 @@ tle_tcp_stream_writev(struct tle_stream *ts, struct rte_mempool *mp,
 	for (i = 0; i != iovcnt; i++) {
 		iv = iov[i];
 		sz += iv.iov_len;
+		/*复制数组*/
 		k += _iovec_to_mbsegs(&iv, slen, mb + k, n - k);
 		if (iv.iov_len != 0) {
 			sz -= iv.iov_len;
@@ -2524,6 +2568,7 @@ tle_tcp_stream_writev(struct tle_stream *ts, struct rte_mempool *mp,
 	/* fill pkt headers */
 	ol_flags = s->tx.dst.ol_flags;
 
+	/*当前填充到第k个元素，遍历这些元素*/
 	for (j = 0; j != k; j++) {
 		rc = tcp_fill_mbuf(mb[j], s, &s->tx.dst, ol_flags,
 			s->s.port, 0, TCP_FLAG_ACK, 0, 0);
@@ -2533,6 +2578,7 @@ tle_tcp_stream_writev(struct tle_stream *ts, struct rte_mempool *mp,
 
 	/* if no error encountered, then enqueue pkts for transmission */
 	if (k == j)
+	    /*存入mbuf到tx queue*/
 		k = _rte_ring_enqueue_burst(s->tx.q, (void **)mb, j);
 	else
 		k = 0;
@@ -2690,10 +2736,13 @@ tle_tcp_process(struct tle_ctx *ctx, uint32_t num)
 
 	tw = CTX_TCP_TMWHL(ctx);
 	tms = tcp_get_tms(ctx->cycles_ms_shift);
+	/*维护定时器，收集已过期的timer*/
 	tle_timer_expire(tw, tms);
 
+	/*获得一组已过期的timer对象(tcp stream)*/
 	k = tle_timer_get_expired_bulk(tw, (void **)rs, RTE_DIM(rs));
 
+	/*处理timer触发tcp stream*/
 	for (i = 0; i != k; i++) {
 
 		s = rs[i];
@@ -2705,7 +2754,8 @@ tle_tcp_process(struct tle_ctx *ctx, uint32_t num)
 
 	/* process streams from to-send queue */
 
-	k = txs_dequeue_bulk(ctx, rs, RTE_DIM(rs));
+	/*出队一组stream*/
+	k = txs_dequeue_bulk(ctx, rs/*出参，记录stream*/, RTE_DIM(rs));
 
 	for (i = 0; i != k; i++) {
 

@@ -28,6 +28,7 @@ extern "C" {
 struct tle_tcp_stream_addr {
     /*本端地址*/
 	struct sockaddr_storage local;  /**< stream local address. */
+	/*对端地址*/
 	struct sockaddr_storage remote; /**< stream remote address. */
 };
 
@@ -49,7 +50,9 @@ struct tle_tcp_stream_cfg {
 };
 
 struct tle_tcp_stream_param {
-	struct tle_tcp_stream_addr addr;/*本端及对端地址*/
+    /*本端及对端地址*/
+	struct tle_tcp_stream_addr addr;
+	/*tcp stream配置情况*/
 	struct tle_tcp_stream_cfg cfg;
 };
 

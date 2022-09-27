@@ -26,7 +26,7 @@ extern "C" {
  * Common structure that must be present as first field in all partcular
  * L4 (UDP/TCP, etc.) stream implementations.
  */
-struct tle_stream {
+struct tle_stream/*stream基类，其上支持udp/tcp*/ {
 
 	STAILQ_ENTRY(tle_stream) link;
 	struct tle_ctx *ctx;
@@ -35,7 +35,8 @@ struct tle_stream {
 	uint8_t type;	       /* TLE_V4 or TLE_V6 */
 
 	/* Stream address information. */
-	union l4_ports port;//源目的端口信息
+	//源目的端口信息
+	union l4_ports port;
 	//流的port地址将与此值与，与后与port进行对比，相同才能匹配
 	//原则上只有匹配目的ip地址与目的端口地址
 	union l4_ports pmsk;
@@ -43,12 +44,12 @@ struct tle_stream {
 
 	union {
 		struct {
-			union ipv4_addrs addr;
-			union ipv4_addrs mask;
-		} ipv4;//源目的地址
+			union ipv4_addrs addr;/*ipv4源目的地址*/
+			union ipv4_addrs mask;/*ipv4源目的地址掩码*/
+		} ipv4;
 		struct {
-			union ipv6_addrs addr;
-			union ipv6_addrs mask;
+			union ipv6_addrs addr;/*ipv6源目的地址*/
+			union ipv6_addrs mask;/*ipv6源目的地址掩码*/
 		} ipv6;
 	};
 };
@@ -83,7 +84,7 @@ get_streams(struct tle_ctx *ctx, struct tle_stream *s[], uint32_t num)
 	return n;
 }
 
-//分配一个tle_stream
+//分配一个空闲的tle_stream
 static inline struct tle_stream *
 get_stream(struct tle_ctx *ctx)
 {
@@ -161,6 +162,7 @@ stream_get_dest(struct tle_stream *s, const void *dst_addr,
 	if (rc < 0 || dst->dev == NULL || dst->dev->ctx != ctx)
 		return -ENOENT;
 
+	/*出接口*/
 	dev = dst->dev;
 	dst->ol_flags = dev->tx.ol_flags[s->type];
 
@@ -178,6 +180,7 @@ stream_get_dest(struct tle_stream *s, const void *dst_addr,
 		rte_memcpy(l3h->dst_addr, d6, sizeof(l3h->dst_addr));
 	}
 
+	/*返回出接口index*/
 	return dev - ctx->dev;
 }
 

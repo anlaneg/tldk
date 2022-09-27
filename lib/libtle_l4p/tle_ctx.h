@@ -67,9 +67,13 @@ struct tle_bl_port {
  * device parameters.
  */
 struct tle_dev_param {
+    /*rx方向offload标记*/
 	uint64_t rx_offload; /**< DEV_RX_OFFLOAD_* supported. */
+	/*tx方向offload标记*/
 	uint64_t tx_offload; /**< DEV_TX_OFFLOAD_* supported. */
+	/*设备ipv4地址*/
 	struct in_addr local_addr4;  /**< local IPv4 address assigned. */
+	/*设备ipv6地址*/
 	struct in6_addr local_addr6; /**< local IPv6 address assigned. */
 	struct tle_bl_port bl4; /**< blocked ports for IPv4 address. */
 	struct tle_bl_port bl6; /**< blocked ports for IPv4 address. */
@@ -83,8 +87,11 @@ struct tle_dest {
 	struct tle_dev *dev;    /**< device to send packets through. */
 	uint64_t ol_flags;      /**< tx ofload flags. */
 	uint16_t mtu;           /**< MTU for given destination. */
+	/*l2头长度*/
 	uint8_t l2_len;  /**< L2 header length. */
+	/*l3头长度*/
 	uint8_t l3_len;  /**< L3 header length. */
+	/*l2,l3头部内容*/
 	uint8_t hdr[TLE_DST_MAX_HDR]; /**< L2/L3 headers. */
 };
 
@@ -109,8 +116,11 @@ enum {
 };
 
 struct tle_ctx_param {
+    /*所属的numa node*/
 	int32_t socket_id;         /**< socket ID to allocate memory for. */
+	/*当前负责upd/tcp?*/
 	uint32_t proto;            /**< L4 proto to handle. */
+	/*支持的最大stream数*/
 	uint32_t max_streams;      /**< max number of streams in context. */
 	struct {
 		uint32_t min;
@@ -118,26 +128,31 @@ struct tle_ctx_param {
 		uint32_t max;
 		/**< max number of free streams (shrink threshold). */
 	} free_streams;
+	/*每个stream最大收buffer*/
 	uint32_t max_stream_rbufs; /**< max recv mbufs per stream. */
+	/*每个stream最大发buffer*/
 	uint32_t max_stream_sbufs; /**< max send mbufs per stream. */
+	/*发送时bulk数目*/
 	uint32_t send_bulk_size;   /**< expected # of packets per send call. */
 	uint32_t flags;            /**< specific flags */
 
-	int (*lookup4)(void *opaque, const struct in_addr *addr,
+	/*ipv4路由查询*/
+	int (*lookup4)(void *opaque, const struct in_addr *addr/*ip地址*/,
 		struct tle_dest *res);
 	/**< will be called by send() to get IPv4 packet destination info. */
-	void *lookup4_data;
+	void *lookup4_data;/*lookup4使用的opaque指针*/
 	/**< opaque data pointer for lookup4() callback. */
 
+	/*ipv6路由查询*/
 	int (*lookup6)(void *opaque, const struct in6_addr *addr,
 		struct tle_dest *res);
 	/**< will be called by send() to get IPv6 packet destination info. */
-	void *lookup6_data;
+	void *lookup6_data;/*lookup6使用的opaque指针*/
 	/**< opaque data pointer for lookup6() callback. */
 
-	uint32_t hash_alg;
+	uint32_t hash_alg;/*使用哪种hash算法*/
 	/**< hash algorithm to be used to generate sequence number. */
-	rte_xmm_t secret_key;
+	rte_xmm_t secret_key;/*计算hashcode用的secret_key*/
 	/**< secret key to be used to calculate the hash. */
 
 	uint32_t icw; /**< initial congestion window, default is 2*MSS if 0. */
