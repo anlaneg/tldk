@@ -1089,7 +1089,7 @@ be_rx(struct tldk_dev *dev)
 	struct rte_mbuf *rp[MAX_PKT_BURST];
 	int32_t rc[MAX_PKT_BURST];
 
-	//自接口收包
+	//自接口的约定队列收包
 	n = rte_eth_rx_burst(dev->cf.port,
 		dev->cf.queue, pkt/*出参，收到的报文*/, RTE_DIM(pkt));
 
@@ -1175,9 +1175,10 @@ be_lcore_tcp(struct tldk_ctx *tcx)
 	for (i = 0; i != tcx->nb_dev; i++) {
 	    //自设备dev[i]收包，并准备传递给fe进行处理
 		be_rx(&tcx->dev[i]);
-		//收取fe处理结果，并向设备dev[i]发包
+		//收取fe处理结果，向设备dev[i]发包
 		be_tx(&tcx->dev[i]);
 	}
+	/*tcp协议timer,关闭连接处理*/
 	tle_tcp_process(tcx->ctx, TCP_MAX_PROCESS);
 }
 
@@ -1259,14 +1260,14 @@ be_lcore_main(void *arg)
 	struct lcore_ctxs_list *lc_ctx;
 
 	lc_ctx = arg;
-	lid = rte_lcore_id();
+	lid = rte_lcore_id();/*当前worker id*/
 
 	RTE_LOG(NOTICE, USER1, "%s(lcore=%u) start\n", __func__, lid);
 
 	rc = 0;
-	while (force_quit == 0) {
+	while (force_quit == 0/*如果未指明退出，则继续循环*/) {
 		for (i = 0; i < lc_ctx->nb_ctxs; i++) {
-			tcx = lc_ctx->ctxs[i];
+			tcx = lc_ctx->ctxs[i];/*取当前core对应的tcp context*/
 			be_lcore_tcp(tcx);
 		}
 	}

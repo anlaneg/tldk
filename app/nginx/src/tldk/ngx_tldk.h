@@ -64,7 +64,7 @@ struct tldk_port_conf {
 struct tldk_dev_conf {
 	uint32_t id;/*设备id*/
 	uint32_t port;/*port id编号，于tld_port_conf的顺序一致*/
-	uint32_t queue;
+	uint32_t queue;/*设备的队列id*/
 };
 
 /*路由情况*/
@@ -151,7 +151,7 @@ struct tldk_ctx {
 	struct tle_ctx *ctx;
 	struct rte_mempool *mpool;/*指向创建的mbuf pool*/
 	struct rte_mempool *frag_mpool;/*指向创建的分片mbuf pool*/
-	uint32_t nb_dev;
+	uint32_t nb_dev;/*dev数组长度（即设备数目）*/
 	struct tldk_dev dev[RTE_MAX_ETHPORTS];
 	uint32_t dst4_num;
 	uint32_t dst6_num;

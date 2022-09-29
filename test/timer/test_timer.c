@@ -39,9 +39,9 @@ struct timer_test_main {
 	uint64_t last_run_time;
 	uint32_t current_tick;
 	uint32_t seed;
-	uint32_t ntimers;
-	uint32_t niter;
-	uint32_t ticks_per_iter;
+	uint32_t ntimers;/*timer总数*/
+	uint32_t niter;/*测试多少轮*/
+	uint32_t ticks_per_iter;/*假设的每轮时间流逝值*/
 	struct tle_timer_wheel_args prm;
 	struct test_elements *test_elts;
 };
@@ -57,25 +57,29 @@ random_uint32_t(uint32_t *seed)
 }
 
 static void
-run_wheel(struct timer_test_main *tm, uint64_t interval, uint32_t *expired)
+run_wheel(struct timer_test_main *tm, uint64_t interval/*流逝的时间*/, uint32_t *expired/*出参，统计过期的timer数*/)
 {
 	uint32_t i, j, k;
 	uint64_t now = tm->last_run_time + tm->prm.tick_size;
 	uint32_t nb_tick;
 	struct test_elements *te[MAX_TIMER_BURST];
 
-	nb_tick = interval / tm->prm.tick_size;
+	nb_tick = interval / tm->prm.tick_size;/*流逝了多少个tick*/
 
+	/*遍历流逝掉的tick*/
 	for (i = 0; i < nb_tick; i++)
 	{
+	    /*收集过期的timer*/
 		tle_timer_expire(tm->tmr, now);
-		tm->last_run_time = now;
+		tm->last_run_time = now;/*更新当前时间*/
 
+		/*取burst个timer*/
 		k = tle_timer_get_expired_bulk(tm->tmr, (void **)te,
 			RTE_DIM(te));
 		while (k != 0) {
 			for (j = 0; j != k; j++)
 			{
+			    /*处理定时器*/
 				if (tm->current_tick != te[j]->expected_tick)
 					RTE_LOG(ERR, USER1,
 						"%s: [%u] expired at tick=%u, "
@@ -89,10 +93,11 @@ run_wheel(struct timer_test_main *tm, uint64_t interval, uint32_t *expired)
 				*expired += 1;
 			}
 
+			/*现出一组timer*/
 			k = tle_timer_get_expired_bulk(tm->tmr, (void **)te,
 				RTE_DIM(te));
 		};
-		now += (tm->prm.tick_size);
+		now += (tm->prm.tick_size);/*时间流逝(模拟一个tick)*/
 		tm->current_tick++;
 	}
 }
@@ -114,11 +119,12 @@ test_timer_rdtsc(void)
 
 	memset(&tm, 0, sizeof(tm));
 	/* Default values */
-	tm.ntimers = 1000000;
+	tm.ntimers = 1000000;/*timer总数目*/
 	tm.seed = 0xDEADDABE;
 	tm.niter = 1000;
 	tm.ticks_per_iter = 57;
 	tm.current_tick = 0;
+	/*申请ntimers个元素*/
 	tm.test_elts = rte_zmalloc_socket(NULL,
 		tm.ntimers * sizeof(tm.test_elts[0]), RTE_CACHE_LINE_SIZE,
 		SOCKET_ID_ANY);
@@ -132,6 +138,7 @@ test_timer_rdtsc(void)
 	start_tsc = rte_rdtsc();
 
 	tm.prm = prm;
+	/*创建轮子定时器*/
 	tm.tmr = tle_timer_create(&prm, start_tsc);
 	tm.last_run_time = start_tsc;
 
@@ -147,25 +154,31 @@ test_timer_rdtsc(void)
 	/* Prime offset */
 	initial_wheel_offset = tm.ticks_per_iter;
 
-	run_wheel(&tm, initial_wheel_offset * prm.tick_size, &expires);
+	/*此时无timer*/
+	run_wheel(&tm, initial_wheel_offset * prm.tick_size/*当前流逝的时间*/, &expires/*出参，过期的timer数*/);
 
+	/*设置所有定时器*/
 	/* Prime the pump */
 	for (i = 0; i < tm.ntimers; i++)
 	{
 		te= &tm.test_elts[i];
 		te->id = i;
 
+		/*随机产生过timer的过期时间*/
 		do {
 			expiration_time =
 				(random_uint32_t(&tm.seed) & ((1<<17) - 1));
 		} while (expiration_time == 0);
 
+		/*更新最大的过期时间*/
 		if (expiration_time > max_expiration_time)
 			max_expiration_time = expiration_time;
 
+		/*记录此定时器要存入的tick位置*/
 		te->expected_tick = expiration_time + initial_wheel_offset;
+		/*创建定时器*/
 		te->stop_handle = tle_timer_start(tm.tmr, te,
-			expiration_time * prm.tick_size);
+			expiration_time * prm.tick_size/*定时器到期时间*/);
 		if (te->stop_handle == NULL) {
 			RTE_LOG(ERR, USER1, "%s: timer start error=%d\n",
 				__func__, rte_errno);
@@ -174,12 +187,14 @@ test_timer_rdtsc(void)
 		te->active = 1;
 	}
 
-	adds += i;
+	adds += i;/*计录有多少定时器被添加*/
 
 	for (i = 0; i < tm.niter; i++)
 	{
+	    /*先触发一波定时器*/
 		run_wheel(&tm, initial_wheel_offset * prm.tick_size, &expires);
 
+		/*停止掉1/4的定时器*/
 		for (k = 0, j = 0; j < tm.ntimers; j++) {
 			te = &tm.test_elts[j];
 
@@ -194,22 +209,27 @@ test_timer_rdtsc(void)
 			}
 		}
 
+		/*记录被停止的定时器数目*/
 		deletes += k;
 
+		/*更新1/4的定时器，变更它的超时时间*/
 		for (k = 0, j = 0; j < tm.ntimers; j++)
 		{
 			te = &tm.test_elts[j];
 
 			if (!te->active) {
+			    /*新的过期时间*/
 				do {
 					expiration_time =
 						(random_uint32_t(&tm.seed) &
 						((1<<17) - 1));
 				} while (expiration_time == 0);
 
+				/*更新最大预期时间*/
 				if (expiration_time > max_expiration_time)
 					max_expiration_time = expiration_time;
 
+				/*重设定时器*/
 				te->expected_tick = expiration_time +
 					tm.current_tick;
 				te->stop_handle = tle_timer_start(tm.tmr, te,
@@ -231,11 +251,13 @@ test_timer_rdtsc(void)
 		adds += k;
 	}
 
+	/*再触发一波定时器（此时采用的是最大时间）所有定时器会被触发*/
 	run_wheel(&tm, (max_expiration_time + 1) * prm.tick_size, &expires);
 
 	cur_tsc = rte_rdtsc();
 	diff_tsc = cur_tsc - start_tsc;
 
+	/*每秒触发的时间*/
 	ops_per_sec = ((double)adds + deletes +
 		tm.current_tick) / RDTSC_TO_SEC(diff_tsc, hz);
 
@@ -256,12 +278,14 @@ main(int argc, char *argv[])
 {
 	int32_t rc;
 
+	/*初始化dpdk*/
 	rc = rte_eal_init(argc, argv);
 	if (rc < 0)
 		rte_exit(EXIT_FAILURE,
 			"%s: rte_eal_init failed with error code: %d\n",
 			__func__, rc);
 
+	/*开始测试timer*/
 	rc = test_timer_rdtsc();
 	if (rc != 0)
 		printf("test_timer_rdtsc TEST FAILED\n");

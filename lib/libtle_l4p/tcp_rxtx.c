@@ -2724,7 +2724,7 @@ rto_stream(struct tle_tcp_stream *s, uint32_t tms)
 }
 
 int
-tle_tcp_process(struct tle_ctx *ctx, uint32_t num)
+tle_tcp_process(struct tle_ctx *ctx, uint32_t num/*最多处理的数目*/)
 {
 	uint32_t i, k, tms;
 	struct sdr *dr;
@@ -2735,7 +2735,7 @@ tle_tcp_process(struct tle_ctx *ctx, uint32_t num)
 	/* process streams with RTO exipred */
 
 	tw = CTX_TCP_TMWHL(ctx);
-	tms = tcp_get_tms(ctx->cycles_ms_shift);
+	tms = tcp_get_tms(ctx->cycles_ms_shift);/*取当前ms数*/
 	/*维护定时器，收集已过期的timer*/
 	tle_timer_expire(tw, tms);
 
