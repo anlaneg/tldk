@@ -562,6 +562,7 @@ setsockopt(int sd, int level, int optname, const void *optval, socklen_t optlen)
 
 	ts = sd_to_sock(sd);
 	if (ts == NULL)
+	    /*调用回调完成setsockopt*/
 		return real_setsockopt(sd, level, optname, optval, optlen);
 	else if (ts->s == NULL) {
 		errno = EBADF;

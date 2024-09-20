@@ -255,8 +255,9 @@ tle_timer_start(struct tle_timer_wheel *tw, void *obj, uint64_t interval)
 
 	fast_ring_index = nb_tick & TW_RING_MASK;
 	fast_ring_index += tw->current_index[TW_RING_FAST];
+	/*是否需要考虑进位*/
 	carry = fast_ring_index >= TW_SLOTS_PER_RING ? 1 : 0;
-	fast_ring_index %= TW_SLOTS_PER_RING;
+	fast_ring_index %= TW_SLOTS_PER_RING;/*fast轮上位于哪个格*/
 	slow_ring_index = (nb_tick >> TW_RING_SHIFT) + carry;
 
 	/* Timer duration exceeds ~7 hrs? Oops */
